@@ -125,10 +125,8 @@ describe("worker", () => {
 
   it("answers 404 for every route until routes are built", async () => {
     const company = await harness.seedCompany();
-    const response = await harness.request("rooms.list", {
-      method: "GET",
-      path: "/rooms",
-      companyId: company.id,
+    const response = await harness.request("GET", "/rooms", {
+      query: { companyId: company.id },
       actor: company.members.owner,
     });
     expect(response.status).toBe(404);
