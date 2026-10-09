@@ -208,3 +208,16 @@ export interface RemoveWorkLinkResponse {
   removed: true;
   issueId: string;
 }
+
+/** A Room that has a work link for an issue (the "From Room" chip). */
+export interface IssueRoomView {
+  roomId: string;
+  title: string;
+  status: Room["status"];
+  relation: WorkLink["relation"];
+}
+
+export interface IssueRoomsResponse {
+  /** Oldest link first; empty when the issue is in no Room. */
+  rooms: IssueRoomView[];
+}

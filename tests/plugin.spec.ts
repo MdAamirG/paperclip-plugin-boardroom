@@ -100,6 +100,7 @@ describe("built manifest", () => {
       expect.arrayContaining([
         expect.objectContaining({ type: "page", routePath: "boardroom", exportName: "BoardroomPage" }),
         expect.objectContaining({ type: "sidebar", exportName: "BoardroomSidebarLink" }),
+        expect.objectContaining({ type: "toolbarButton", exportName: "FromRoomChip", entityTypes: ["issue"] }),
       ]),
     );
   });
