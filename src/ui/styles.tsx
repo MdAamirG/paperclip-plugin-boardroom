@@ -73,6 +73,10 @@ textarea.br-input { resize: vertical; min-height: ${SPACE(24)}; }
 .br-mention-list { display: flex; flex-direction: column; border: thin solid var(--border); border-radius: var(--radius-md, 0.375rem); background: var(--card); max-height: ${SPACE(48)}; overflow-y: auto; }
 .br-mention-option { display: flex; align-items: baseline; justify-content: space-between; gap: ${SPACE(3)}; padding: ${SPACE(2)} ${SPACE(3)}; cursor: pointer; }
 .br-mention-option[data-active="true"], .br-mention-option:hover { background: var(--accent); }
+.br-work-list { display: flex; flex-direction: column; }
+.br-work-row { display: flex; flex-direction: column; gap: ${SPACE(1.5)}; padding: ${SPACE(2)} 0; border-bottom: thin solid var(--border); }
+.br-work-row:last-child { border-bottom: 0; }
+.br-work-link { color: var(--foreground); font-weight: 500; overflow-wrap: anywhere; }
 .br-visually-hidden { position: absolute; width: ${SPACE(0.25)}; height: ${SPACE(0.25)}; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 `;
 

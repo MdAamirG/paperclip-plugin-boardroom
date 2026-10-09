@@ -2,12 +2,16 @@ import { createContext, createElement, useContext, useMemo, type ReactNode } fro
 import { BOARDROOM_PLUGIN_ID } from "../constants.js";
 import type {
   CreateRoomRequest,
+  CreateWorkRequest,
+  CreateWorkResponse,
   MessageListResponse,
+  RemoveWorkLinkResponse,
   RoomDetail,
   RoomListResponse,
   SendMessageRequest,
   SendMessageResponse,
   UpdateDecisionRequest,
+  WorkLinkView,
 } from "../api/types.js";
 
 /**
@@ -128,9 +132,9 @@ export interface BoardroomClient {
   closeRoom<T = unknown>(roomId: string): Promise<T>;
   /** Save the Decision record (an empty string clears it); answers with the Room detail. */
   updateDecision(roomId: string, body: Pick<UpdateDecisionRequest, "decisionMd">): Promise<RoomDetail>;
-  createWork<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
-  addWorkLink<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
-  removeWorkLink<T = unknown>(roomId: string, issueId: string): Promise<T>;
+  createWork(roomId: string, body: Omit<CreateWorkRequest, "companyId">): Promise<CreateWorkResponse>;
+  addWorkLink(roomId: string, body: { issueId: string }): Promise<WorkLinkView>;
+  removeWorkLink(roomId: string, issueId: string): Promise<RemoveWorkLinkResponse>;
   listRoomsForIssue<T = unknown>(issueId: string): Promise<T>;
 }
 

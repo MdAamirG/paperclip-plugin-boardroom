@@ -7,6 +7,7 @@ import { listRoomMessages, sendMessage } from "./messages.js";
 import { updateDecision } from "./decision.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
+import { addWorkLink, createWork, removeWorkLink } from "./work.js";
 
 /**
  * Route key to handler. A route with no entry answers 501 `not_implemented`; the ticket that owns
@@ -19,6 +20,9 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "messages.list": listRoomMessages,
   "messages.send": sendMessage,
   "decision.update": updateDecision,
+  "work.create": createWork,
+  "work-links.add": addWorkLink,
+  "work-links.remove": removeWorkLink,
 };
 
 const KNOWN_ROUTE_KEYS: ReadonlySet<string> = new Set(ROUTE_SPECS.map((spec) => spec.routeKey));

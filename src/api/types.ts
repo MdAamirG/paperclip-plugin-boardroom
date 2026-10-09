@@ -37,6 +37,23 @@ export interface DecisionView {
   /** When it was last saved (ISO). */
   at: string;
 }
+/** The live state of a linked issue, read through `ctx.issues` when the Room is loaded. */
+export interface WorkIssueView {
+  id: string;
+  /** Human-readable identifier such as `PAP-12`; null before the host assigns one. */
+  identifier: string | null;
+  title: string;
+  status: string;
+  priority: string | null;
+  assigneeAgentId: string | null;
+  /** From the agent record; null when there is no agent assignee or it no longer exists. */
+  assigneeAgentName: string | null;
+  assigneeUserId: string | null;
+  projectId: string | null;
+}
+
+/** A work link with the issue it points to. `issue` is null when the issue can no longer be read. */
+export type WorkLinkView = WorkLink & { issue: WorkIssueView | null };
 
 export interface RoomDetail {
   room: Room;
@@ -44,7 +61,8 @@ export interface RoomDetail {
   participants: ParticipantView[];
   /** The running or paused Round, or null. */
   activeRound: Round | null;
-  workLinks: WorkLink[];
+  /** Follow-up work, oldest first, with each issue read live. */
+  workLinks: WorkLinkView[];
   /** The Decision record, or null when none is recorded. */
   decision: DecisionView | null;
   permissions: RoomPermissions;
@@ -125,4 +143,35 @@ export interface UpdateDecisionRequest {
   companyId: string;
   /** The markdown; an empty or blank string clears the record. */
   decisionMd: string;
+}
+
+export interface CreateWorkRequest {
+  companyId: string;
+  title: string;
+  description?: string | null;
+  projectId?: string | null;
+  assigneeAgentId?: string | null;
+  assigneeUserId?: string | null;
+  priority?: "critical" | "high" | "medium" | "low" | null;
+  /** Markdown body of the new issue's `plan` document. */
+  plan?: string | null;
+}
+
+export interface CreateWorkResponse {
+  workLink: WorkLinkView;
+  issue: WorkIssueView;
+  /** False when a plan was given but could not be saved; the issue and the link exist anyway. */
+  planSaved: boolean;
+  /** The host's reason when the plan was not saved. */
+  planError?: string;
+}
+
+export interface AddWorkLinkRequest {
+  companyId: string;
+  issueId: string;
+}
+
+export interface RemoveWorkLinkResponse {
+  removed: true;
+  issueId: string;
 }

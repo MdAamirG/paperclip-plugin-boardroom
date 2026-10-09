@@ -28,6 +28,8 @@ paperclipai plugin install /absolute/path/to/paperclip-plugin-boardroom
 
 The manifest declares: the plugin database namespace (migrate, read, write); `agents.read`; `projects.read` (Room creation checks that the chosen project belongs to the company); agent sessions (create, send, close); `access.members.read`; issues (read, create) and issue documents (write); activity log (write); events (subscribe); jobs (schedule); API routes (register); and UI page, sidebar and action registration. A manifest that declares a capability the host does not know fails to install, so the list only grows with the host.
 
+Follow-up work uses `issues.read` (the live work list and the link check), `issues.create` (the new task has origin kind `plugin:mdaamirg.boardroom`, origin id = the Room id and `actor.actorUserId` = the acting user) and `issue.documents.write` (the optional `plan` document). All three names are valid in `@paperclipai/plugin-sdk@2026.1005.0`. The host's own HTTP status for a refused task creation does not reach the plugin (the RPC carries a message and a numeric code), so a refusal is answered 422 `issue_create_failed` with the host's message, unless the error carries its own status.
+
 ## Access and company roles
 
 The plugin reads the caller's company role on every request (`ctx.access.members`): owner, admin and operator may post, a viewer may only read, and the Room Owner or a company owner or admin controls a Room. A membership with no role counts as an operator; an unrecognised role counts as a viewer.
