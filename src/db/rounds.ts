@@ -129,17 +129,39 @@ export async function nextRoundSeq(db: Db, companyId: string, roomId: string): P
 
 /**
  * Set a Round's status; `ended_at` is set for `stopped` and `completed` and cleared otherwise.
- * Returns false when no such Round exists in the company. Does not check transitions: callers do.
+ *
+ * With `expectedFrom`, the update is a compare-and-set: it applies only while the Round is in one
+ * of those statuses, so two callers racing (for example Stop against the Round finishing) cannot
+ * both win. Returns whether a row changed: false when the Round does not exist in the company or,
+ * with `expectedFrom`, was not in an expected status. An empty `expectedFrom` never matches.
+ * Without `expectedFrom` it does not check transitions: callers do.
  * Setting `running` or `paused` throws if another Round of the Room is already active.
+ *
+ * The expected statuses travel as a JSON string, not a JS array: the host expands an array
+ * parameter into a parenthesised list, so `= ANY($n)` with an array fails there.
  */
-export async function setRoundStatus(db: Db, companyId: string, roundId: string, status: RoundStatus): Promise<boolean> {
+export async function setRoundStatus(
+  db: Db,
+  companyId: string,
+  roundId: string,
+  status: RoundStatus,
+  options: { expectedFrom?: readonly RoundStatus[] } = {},
+): Promise<boolean> {
+  const { expectedFrom } = options;
+  if (expectedFrom && expectedFrom.length === 0) return false;
+  const params: unknown[] = [companyId, roundId, status];
+  let guard = "";
+  if (expectedFrom) {
+    params.push(JSON.stringify(expectedFrom));
+    guard = "AND status IN (SELECT jsonb_array_elements_text($4::jsonb))";
+  }
   const { rowCount } = await db.execute(
     `UPDATE ${table(db, "rounds")}
      SET status = $3,
          updated_at = now(),
          ended_at = CASE WHEN $3 IN ('stopped', 'completed') THEN now() ELSE NULL END
-     WHERE company_id = $1 AND id = $2`,
-    [companyId, roundId, status],
+     WHERE company_id = $1 AND id = $2 ${guard}`,
+    params,
   );
   return rowCount > 0;
 }
