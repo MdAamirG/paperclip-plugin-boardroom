@@ -4,60 +4,31 @@ import {
   MAX_MESSAGE_PAGE_SIZE,
   getMessage,
   getMessageByIdempotencyKey,
+  countCountedTurns,
+  getActiveRound,
+  getRound,
+  getRoundByTriggerMessage,
   insertMessage,
   listMessagesPage,
-  touchRoom,
   type RoomMessage,
 } from "../db/index.js";
-import { requireLevel } from "./access.js";
+import { startRound } from "../engine/rounds.js";
+import { canControl, canPost, requireLevel } from "./access.js";
 import { audit } from "./audit.js";
 import type { RouteHandler } from "./context.js";
-import { badRequest, conflict, ok } from "./errors.js";
-import { announceRoomChanged } from "./live.js";
+import { badRequest, conflict, forbidden, ok, unprocessable } from "./errors.js";
+import { announceRoomChanged, touchRoomSafely } from "./live.js";
 import { resolveMentions } from "./mentions.js";
+import { toMessageViews } from "./message-view.js";
+import { toRoundViews } from "./round-view.js";
 import { loadRoom } from "./rooms.js";
 import type { MessageListResponse, MessageView, SendMessageResponse } from "./types.js";
 import { isUuid, readBody, requiredString } from "./validation.js";
 
+export { toMessageViews };
 export const MESSAGE_BODY_MAX = 20_000;
 export const IDEMPOTENCY_KEY_MAX = 200;
 export const MENTIONS_MAX = 50;
-
-/**
- * Messages with their author's name. Agent names come from `ctx.agents` (one lookup per agent,
- * even if the agent was removed from the Room, so attribution survives removal); a failed lookup
- * or a deleted agent gives `null`. User names are `null` (the SDK has no user name lookup).
- */
-export async function toMessageViews(ctx: PluginContext, companyId: string, messages: readonly RoomMessage[]): Promise<MessageView[]> {
-  const agentIds = [...new Set(messages.filter((m) => m.authorKind === "agent").map((m) => m.authorId))];
-  const names = new Map<string, string | null>();
-  await Promise.all(
-    agentIds.map(async (agentId) => {
-      if (!isUuid(agentId)) return names.set(agentId, null);
-      try {
-        names.set(agentId, (await ctx.agents.get(agentId, companyId))?.name ?? null);
-      } catch (error) {
-        ctx.logger.warn("Boardroom could not look up an agent name", {
-          agentId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        names.set(agentId, null);
-      }
-    }),
-  );
-  return messages.map((m) => ({
-    id: m.id,
-    roomId: m.roomId,
-    authorKind: m.authorKind,
-    authorId: m.authorId,
-    authorName: m.authorKind === "agent" ? (names.get(m.authorId) ?? null) : null,
-    body: m.body,
-    createdAt: m.createdAt,
-    roundId: m.roundId,
-    turnId: m.turnId,
-    runId: m.runId,
-  }));
-}
 
 function queryValue(input: { query: Record<string, string | string[]> }, key: string): string | undefined {
   const value = input.query[key];
@@ -99,6 +70,8 @@ export const listRoomMessages: RouteHandler = async ({ ctx, input, actor }) => {
 
 interface ValidatedSend {
   body: string;
+  /** Validated; "Ask all" is acted on by the multi-agent ticket. */
+  askAll: boolean;
   mentions: string[];
   idempotencyKey: string;
 }
@@ -117,16 +90,20 @@ function parseSendBody(raw: Record<string, unknown>): ValidatedSend {
     }
     mentions = rawMentions as string[];
   }
-  // `askAll` is validated now and acted on by the Round ticket; until then a send is always a note.
   if (raw.askAll !== undefined && raw.askAll !== null && typeof raw.askAll !== "boolean") {
     throw badRequest('"askAll" must be true or false', { field: "askAll" });
   }
-  return { body, mentions, idempotencyKey };
+  return { body, mentions, askAll: raw.askAll === true, idempotencyKey };
 }
 
 /**
- * `POST /rooms/:roomId/messages`: save a note. Mentions are parsed and reported but start no
- * Round yet (ticket 06 turns valid mentions and `askAll` into one).
+ * `POST /rooms/:roomId/messages`: save a note; valid mentions of active Participants also start a
+ * Round (one Turn each, in the order mentioned). "Ask all" is not acted on yet.
+ *
+ * Starting a Round needs `control` (403 `round_not_allowed`), no active Round (409 `round_active`)
+ * and room under the turn cap (422 `turn_cap_reached`); these are checked before anything is
+ * saved. If a concurrent send wins the Round slot after the checks, the note stays saved and this
+ * send answers 409 `round_active` (a retry with the same key replays the note without a Round).
  *
  * Idempotency: a key already used in this Room returns that Message with status 200 and writes
  * nothing (no activity entry, no event). The ignored mentions are not stored, so a replay
@@ -144,7 +121,10 @@ export const sendMessage: RouteHandler = async ({ ctx, input, actor }) => {
     }
     const { ignored } = await resolveMentions(ctx, { companyId, roomId: room.id, body: send.body, mentions: send.mentions });
     const [message] = await toMessageViews(ctx, companyId, [original]);
-    return ok<SendMessageResponse>({ message: message!, round: null, ignoredMentions: ignored }, 200);
+    // The Round this Message started, as it is now; nothing is started again.
+    const started = await getRoundByTriggerMessage(ctx.db, companyId, room.id, original.id);
+    const [round] = await toRoundViews(ctx, companyId, room.id, started ? [started] : []);
+    return ok<SendMessageResponse>({ message: message!, round: round ?? null, ignoredMentions: ignored }, 200);
   };
 
   // Replay first: a send that was saved before the Room closed still answers with its original.
@@ -154,6 +134,23 @@ export const sendMessage: RouteHandler = async ({ ctx, input, actor }) => {
   if (room.status === "closed") throw conflict("room_closed", "This Room is closed, so it no longer accepts messages");
 
   const { valid, ignored } = await resolveMentions(ctx, { companyId, roomId: room.id, body: send.body, mentions: send.mentions });
+
+  if (valid.length > 0) {
+    if (!(canPost(actor) && canControl(actor, room))) {
+      throw forbidden("round_not_allowed", "Only the Room Owner or a company owner or admin can start a Round by mentioning agents");
+    }
+    if (await getActiveRound(ctx.db, companyId, room.id)) {
+      throw conflict("round_active", "This Room already has a Round in progress");
+    }
+    const counted = await countCountedTurns(ctx.db, companyId, room.id);
+    if (counted + valid.length > room.maxTotalTurns) {
+      throw unprocessable("turn_cap_reached", `This would pass the Room's limit of ${room.maxTotalTurns} Turns`, {
+        cap: room.maxTotalTurns,
+        counted,
+        requested: valid.length,
+      });
+    }
+  }
 
   const saved = await insertMessage(ctx.db, companyId, {
     roomId: room.id,
@@ -169,15 +166,8 @@ export const sendMessage: RouteHandler = async ({ ctx, input, actor }) => {
     throw new Error("The Message was neither saved nor found by its idempotency key");
   }
 
-  try {
-    // `rooms.updated_at` is never bumped by the database; a Message keeps the Room fresh.
-    await touchRoom(ctx.db, companyId, room.id);
-  } catch (error) {
-    ctx.logger.warn("Boardroom could not mark a Room as updated", {
-      roomId: room.id,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  // `rooms.updated_at` is never bumped by the database; a Message keeps the Room fresh.
+  await touchRoomSafely(ctx, companyId, room.id);
   await audit(ctx, {
     companyId,
     actingUserId: actor.userId,
@@ -187,6 +177,15 @@ export const sendMessage: RouteHandler = async ({ ctx, input, actor }) => {
   });
   announceRoomChanged(ctx, companyId, room.id);
 
+  let round: Awaited<ReturnType<typeof toRoundViews>>[number] | null = null;
+  if (valid.length > 0) {
+    const started = await startRound(ctx, { room, startedByUserId: actor.userId, triggerMessage: saved, agentIds: valid, askAll: send.askAll });
+    if (!started) throw conflict("round_active", "This Room already has a Round in progress. Your note was saved without a Round.");
+    // Read the Round again: starting it also ran its first Turn.
+    const current = await getRound(ctx.db, companyId, started.id);
+    [round = null] = await toRoundViews(ctx, companyId, room.id, current ? [current] : []);
+  }
+
   const [message] = await toMessageViews(ctx, companyId, [saved]);
-  return ok<SendMessageResponse>({ message: message!, round: null, ignoredMentions: ignored }, 201);
+  return ok<SendMessageResponse>({ message: message!, round, ignoredMentions: ignored }, 201);
 };

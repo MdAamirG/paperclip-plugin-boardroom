@@ -90,3 +90,124 @@ export function findTurnByRunId(db: Db, companyId: string, runId: string): Promi
     mapTurn,
   );
 }
+
+/** Every Turn of the Room's Rounds, by Round then order (the Round history). */
+export function listTurnsForRoom(db: Db, companyId: string, roomId: string): Promise<Turn[]> {
+  return selectMany(
+    db,
+    `SELECT t.* FROM ${table(db, "turns")} t
+       JOIN ${table(db, "rounds")} r ON r.company_id = t.company_id AND r.id = t.round_id
+      WHERE t.company_id = $1 AND r.room_id = $2
+      ORDER BY r.seq, t.ord`,
+    [companyId, roomId],
+    mapTurn,
+  );
+}
+
+/**
+ * Turns that count against the Room's turn cap: every Turn of the Room except those skipped
+ * before their run started (a skipped Turn never starts one).
+ */
+export async function countCountedTurns(db: Db, companyId: string, roomId: string): Promise<number> {
+  const rows = await db.query<Row>(
+    `SELECT count(*)::int AS n FROM ${table(db, "turns")} t
+       JOIN ${table(db, "rounds")} r ON r.company_id = t.company_id AND r.id = t.round_id
+      WHERE t.company_id = $1 AND r.room_id = $2 AND t.outcome IS DISTINCT FROM 'skipped'`,
+    [companyId, roomId],
+  );
+  return num(rows[0]?.n ?? 0);
+}
+
+/**
+ * Start the Round's next queued Turn (lowest `ord`): it becomes `running` with `started_at` set.
+ * One statement, and it applies only while the Round is `running` and none of its Turns is
+ * running, so two callers racing cannot start two Turns. Returns the started Turn, or `null`
+ * when nothing was started (a Turn is running, the Round is not running, or none is queued).
+ */
+export async function startNextTurn(db: Db, companyId: string, roundId: string): Promise<Turn | null> {
+  const turns = table(db, "turns");
+  const { rowCount } = await db.execute(
+    `UPDATE ${turns} SET status = 'running', started_at = now()
+      WHERE company_id = $1 AND status = 'queued'
+        AND id = (SELECT q.id FROM ${turns} q WHERE q.company_id = $2 AND q.round_id = $3 AND q.status = 'queued' ORDER BY q.ord LIMIT 1)
+        AND NOT EXISTS (SELECT 1 FROM ${turns} x WHERE x.company_id = $4 AND x.round_id = $5 AND x.status = 'running')
+        AND EXISTS (SELECT 1 FROM ${table(db, "rounds")} r WHERE r.company_id = $6 AND r.id = $7 AND r.status = 'running')`,
+    [companyId, companyId, roundId, companyId, roundId, companyId, roundId],
+  );
+  if (rowCount === 0) return null;
+  return selectOne(
+    db,
+    `SELECT * FROM ${turns} WHERE company_id = $1 AND round_id = $2 AND status = 'running'`,
+    [companyId, roundId],
+    mapTurn,
+  );
+}
+
+/** How many Turns of the Round have not finished (queued or running). */
+export async function countUnfinishedTurns(db: Db, companyId: string, roundId: string): Promise<number> {
+  const rows = await db.query<Row>(
+    `SELECT count(*)::int AS n FROM ${table(db, "turns")} WHERE company_id = $1 AND round_id = $2 AND status <> 'finished'`,
+    [companyId, roundId],
+  );
+  return num(rows[0]?.n ?? 0);
+}
+
+/** Remember the session a running Turn uses. */
+export async function setTurnSession(db: Db, companyId: string, turnId: string, sessionId: string): Promise<boolean> {
+  const { rowCount } = await db.execute(`UPDATE ${table(db, "turns")} SET session_id = $3 WHERE company_id = $1 AND id = $2`, [
+    companyId,
+    turnId,
+    sessionId,
+  ]);
+  return rowCount > 0;
+}
+
+/** Remember the run the host started for a Turn. Never overwrites a run id that is already set. */
+export async function setTurnRunId(db: Db, companyId: string, turnId: string, runId: string): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "turns")} SET run_id = $3::uuid WHERE company_id = $1 AND id = $2 AND run_id IS NULL`,
+    [companyId, turnId, runId],
+  );
+  return rowCount > 0;
+}
+
+/**
+ * Settle a Turn: `running` becomes `finished` with the outcome. This is the settle-once guard
+ * (`WHERE status = 'running'`): it returns true for the one caller that finished the Turn and false
+ * for every later signal. A run id is stored only if the Turn has none yet.
+ */
+export async function finishRunningTurn(
+  db: Db,
+  companyId: string,
+  turnId: string,
+  result: { outcome: Exclude<TurnOutcome, "skipped">; runId?: string | null; hostMessage?: string | null },
+): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "turns")}
+        SET status = 'finished', outcome = $3, finished_at = now(),
+            run_id = COALESCE(run_id, $4::uuid), host_message = $5::text
+      WHERE company_id = $1 AND id = $2 AND status = 'running'`,
+    [companyId, turnId, result.outcome, result.runId ?? null, result.hostMessage ?? null],
+  );
+  return rowCount > 0;
+}
+
+/** Point a Turn at the Message it posted. */
+export async function setTurnMessage(db: Db, companyId: string, turnId: string, messageId: string): Promise<boolean> {
+  const { rowCount } = await db.execute(`UPDATE ${table(db, "turns")} SET message_id = $3 WHERE company_id = $1 AND id = $2`, [
+    companyId,
+    turnId,
+    messageId,
+  ]);
+  return rowCount > 0;
+}
+
+/** A finished Turn whose reply could not be saved becomes `failed` (the host message says why). */
+export async function markPostedTurnFailed(db: Db, companyId: string, turnId: string, hostMessage: string): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "turns")} SET outcome = 'failed', host_message = $3
+      WHERE company_id = $1 AND id = $2 AND status = 'finished' AND outcome = 'posted' AND message_id IS NULL`,
+    [companyId, turnId, hostMessage],
+  );
+  return rowCount > 0;
+}

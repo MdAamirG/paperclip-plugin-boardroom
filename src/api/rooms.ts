@@ -21,6 +21,7 @@ import { announceRoomChanged } from "./live.js";
 import { decisionViewFor } from "./decision-view.js";
 import type { ParticipantView, RoomDetail, RoomListResponse } from "./types.js";
 import { isUuid, optionalId, readBody, requiredString } from "./validation.js";
+import { toRoundViews } from "./round-view.js";
 import { listWorkLinkViews } from "./work-view.js";
 
 const TITLE_MAX = 200;
@@ -66,7 +67,8 @@ export async function buildRoomDetail(ctx: PluginContext, actor: Actor, room: Ro
     }),
   );
   const decision = await decisionViewFor(ctx, room);
-  return { room, participants: views, activeRound, workLinks, decision, permissions: permissionsFor(actor, room) };
+  const [activeRoundView] = await toRoundViews(ctx, room.companyId, room.id, activeRound ? [activeRound] : []);
+  return { room, participants: views, activeRound: activeRoundView ?? null, workLinks, decision, permissions: permissionsFor(actor, room) };
 }
 
 export const listRooms: RouteHandler = async ({ ctx, input, actor }) => {

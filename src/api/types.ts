@@ -55,12 +55,42 @@ export interface WorkIssueView {
 /** A work link with the issue it points to. `issue` is null when the issue can no longer be read. */
 export type WorkLinkView = WorkLink & { issue: WorkIssueView | null };
 
+/** One Turn of a Round as the UI shows it. The session id stays inside the plugin. */
+export interface TurnView {
+  id: string;
+  roundId: string;
+  agentId: string;
+  /** From the agent record; null when the agent no longer exists. */
+  agentName: string | null;
+  /** 1-based order within the Round. */
+  ord: number;
+  status: "queued" | "running" | "finished";
+  /** Set exactly when `status` is `finished`. */
+  outcome: "posted" | "silent" | "failed" | "skipped" | null;
+  skipReason: "not_invokable" | "stopped" | null;
+  /** The host's message, word for word (a rejected send; the failure text of a failed Turn). */
+  hostMessage: string | null;
+  runId: string | null;
+  /** The Message a posted Turn saved. */
+  messageId: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** A Round with its Turns in order. */
+export type RoundView = Round & { turns: TurnView[] };
+
+/** `GET /rooms/:roomId/rounds`: newest Round first. */
+export interface RoundListResponse {
+  rounds: RoundView[];
+}
+
 export interface RoomDetail {
   room: Room;
   /** Active Participants in join order. */
   participants: ParticipantView[];
-  /** The running or paused Round, or null. */
-  activeRound: Round | null;
+  /** The running or paused Round with its Turns, or null. */
+  activeRound: RoundView | null;
   /** Follow-up work, oldest first, with each issue read live. */
   workLinks: WorkLinkView[];
   /** The Decision record, or null when none is recorded. */
@@ -134,8 +164,11 @@ export interface SendMessageRequest {
 
 export interface SendMessageResponse {
   message: MessageView;
-  /** Always null until a Round can start (ticket 06). */
-  round: Round | null;
+  /**
+   * The Round this send started (as it is after its first Turn started), or null for a note.
+   * A replay returns the original Round again and starts nothing.
+   */
+  round: RoundView | null;
   ignoredMentions: IgnoredMention[];
 }
 

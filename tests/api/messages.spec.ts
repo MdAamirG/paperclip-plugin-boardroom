@@ -83,10 +83,9 @@ describe("POST /rooms/:roomId/messages", () => {
     expect(page.body.hasMore).toBe(false);
   });
 
-  it("saves a note and starts no Round even with valid mentions or askAll (ticket 06 changes that)", async () => {
+  it("saves a note and starts no Round for askAll without a valid mention (Ask all comes later)", async () => {
     const s = await setup();
-    const [first] = s.company.agents;
-    const response = await send(s, { body: "@CEO what do you think?", mentions: [first!.id], askAll: true });
+    const response = await send(s, { body: "What does everyone think?", askAll: true });
     expect(response.status).toBe(201);
     expect(response.body.round).toBeNull();
     expect(response.body.ignoredMentions).toEqual([]);
@@ -133,7 +132,7 @@ describe("POST /rooms/:roomId/messages", () => {
     const response = await send(s, {
       body: "@CEO and @CFO and others",
       mentions: [ceo!.id, stranger.id, foreign.id, ghost, "not-an-id"],
-    });
+    }, s.owner);
     expect(response.status).toBe(201);
     expect(response.body.message.body).toBe("@CEO and @CFO and others");
     expect(response.body.ignoredMentions).toEqual([
@@ -149,7 +148,7 @@ describe("POST /rooms/:roomId/messages", () => {
     const s = await setup();
     const [ceo, cto] = s.company.agents;
     await removeParticipant(s.h.ctx.db, s.company.id, s.room.id, cto!.id);
-    const response = await send(s, { body: "@CEO @CTO", mentions: [cto!.id, ceo!.id, cto!.id.toUpperCase()] });
+    const response = await send(s, { body: "@CEO @CTO", mentions: [cto!.id, ceo!.id, cto!.id.toUpperCase()] }, s.owner);
     expect(response.body.ignoredMentions).toEqual([{ agentId: cto!.id, name: "CTO", reason: "removed_participant" }]);
   });
 
@@ -315,7 +314,7 @@ describe("activity, live updates and Room freshness", () => {
     const s = await setup();
     const eventsBefore = s.h.streamEvents.length;
     const activityBefore = s.h.activity.length;
-    const response = await send(s, { body: "note one", mentions: [s.company.agents[0]!.id] });
+    const response = await send(s, { body: "note one" });
 
     const entries = s.h.activity.slice(activityBefore);
     expect(entries.map((e) => e.message)).toEqual(["Message posted"]);
@@ -324,7 +323,7 @@ describe("activity, live updates and Room freshness", () => {
       actingUserId: s.operator.userId,
       roomId: s.room.id,
       messageId: response.body.message.id,
-      mentionedAgentIds: [s.company.agents[0]!.id],
+      mentionedAgentIds: [],
       ignoredMentionCount: 0,
     });
     // The body is not copied into the activity log.
@@ -370,7 +369,7 @@ describe("hand-typed mentions", () => {
   it("are matched by exact name against active Participants (reported in the activity metadata)", async () => {
     const s = await setup();
     const [ceo, cto] = s.company.agents;
-    const response = await send(s, { body: "Hey @CTO, then @CEO." });
+    const response = await send(s, { body: "Hey @CTO, then @CEO." }, s.owner);
     expect(response.status).toBe(201);
     expect(response.body.ignoredMentions).toEqual([]);
     const entry = s.h.activity.find((e) => e.message === "Message posted")!;
@@ -381,7 +380,7 @@ describe("hand-typed mentions", () => {
   it("puts listed mentions first, then hand-typed ones, without duplicates", async () => {
     const s = await setup();
     const [ceo, cto] = s.company.agents;
-    await send(s, { body: "@CEO @CTO again @CEO", mentions: [cto!.id] });
+    await send(s, { body: "@CEO @CTO again @CEO", mentions: [cto!.id] }, s.owner);
     const entry = s.h.activity.find((e) => e.message === "Message posted")!;
     expect(entry.metadata?.mentionedAgentIds).toEqual([cto!.id, ceo!.id]);
   });
@@ -389,7 +388,7 @@ describe("hand-typed mentions", () => {
   it("keeps a listed mention when the agent has been renamed since the body was written", async () => {
     const s = await setup();
     const ceo = s.company.agents[0]!;
-    await send(s, { body: "@OldName what now?", mentions: [ceo.id] });
+    await send(s, { body: "@OldName what now?", mentions: [ceo.id] }, s.owner);
     const entry = s.h.activity.find((e) => e.message === "Message posted")!;
     expect(entry.metadata?.mentionedAgentIds).toEqual([ceo.id]);
   });

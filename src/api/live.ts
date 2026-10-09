@@ -1,4 +1,5 @@
 import type { PluginContext } from "@paperclipai/plugin-sdk";
+import { touchRoom } from "../db/index.js";
 
 /** The single stream channel; the UI subscribes with its company id. */
 export const BOARDROOM_STREAM_CHANNEL = "boardroom";
@@ -23,6 +24,21 @@ export function announceRoomChanged(ctx: PluginContext, companyId: string, roomI
     ctx.streams.emit(BOARDROOM_STREAM_CHANNEL, event);
   } catch (error) {
     ctx.logger.warn("Boardroom could not publish a live update", {
+      roomId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Bump `rooms.updated_at` after a committed write (nothing in the database does it). A failure is
+ * logged, not thrown: the write is already committed and a retry would repeat it.
+ */
+export async function touchRoomSafely(ctx: PluginContext, companyId: string, roomId: string): Promise<void> {
+  try {
+    await touchRoom(ctx.db, companyId, roomId);
+  } catch (error) {
+    ctx.logger.warn("Boardroom could not mark a Room as updated", {
       roomId,
       error: error instanceof Error ? error.message : String(error),
     });

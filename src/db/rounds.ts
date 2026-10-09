@@ -109,6 +109,16 @@ export function getActiveRound(db: Db, companyId: string, roomId: string): Promi
   );
 }
 
+/** The Round a Message started, if any (the idempotency replay finds the original Round here). */
+export function getRoundByTriggerMessage(db: Db, companyId: string, roomId: string, messageId: string): Promise<Round | null> {
+  return selectOne(
+    db,
+    `SELECT ${ROUND_COLUMNS} FROM ${table(db, "rounds")} WHERE company_id = $1 AND room_id = $2 AND trigger_message_id = $3`,
+    [companyId, roomId, messageId],
+    mapRound,
+  );
+}
+
 /** The Room's Rounds by sequence number. */
 export function listRounds(db: Db, companyId: string, roomId: string): Promise<Round[]> {
   return selectMany(

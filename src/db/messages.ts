@@ -164,3 +164,12 @@ export async function listMessagesPage(
   if (newestFirst) page.reverse();
   return { messages: page, hasMore };
 }
+
+/** How many Messages the Room holds. */
+export async function countMessages(db: Db, companyId: string, roomId: string): Promise<number> {
+  const rows = await db.query<Row>(`SELECT count(*)::int AS n FROM ${table(db, "room_messages")} WHERE company_id = $1 AND room_id = $2`, [
+    companyId,
+    roomId,
+  ]);
+  return Number(rows[0]?.n ?? 0);
+}
