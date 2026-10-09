@@ -1,0 +1,50 @@
+{
+  "name": "paperclip-plugin-boardroom",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "description": "Boardroom: human-led multi-agent discussion Rooms for Paperclip",
+  "license": "MIT",
+  "author": "MdAamirG",
+  "keywords": [
+    "paperclip",
+    "plugin",
+    "ui"
+  ],
+  "files": [
+    "dist/",
+    "migrations/"
+  ],
+  "scripts": {
+    "build": "node ./esbuild.config.mjs",
+    "dev": "node ./esbuild.config.mjs --watch",
+    "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4177",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@paperclipai/plugin-sdk": "2026.1005.0",
+    "@paperclipai/shared": "2026.1005.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.27.3",
+    "jsdom": "^26.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
