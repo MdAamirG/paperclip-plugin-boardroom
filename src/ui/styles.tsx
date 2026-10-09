@@ -8,8 +8,13 @@ const SPACE = (n: number) => `calc(var(--spacing, 0.25rem) * ${n})`;
 
 const css = `
 .br-root { display: flex; flex-direction: column; gap: ${SPACE(6)}; padding: ${SPACE(4)}; color: var(--foreground); font-family: var(--font-sans, inherit); font-size: var(--text-sm, 0.875rem); line-height: 1.5; min-width: 0; }
-.br-root h1, .br-root h2, .br-root h3, .br-root p, .br-root ul, .br-root ol, .br-root dl, .br-root dd, .br-root fieldset { margin: 0; padding: 0; }
-.br-root ul, .br-root ol { list-style: none; }
+.br-root h1, .br-root h2, .br-root h3, .br-root p, .br-root dl, .br-root dd, .br-root fieldset { margin: 0; padding: 0; }
+/* Only the plugin's own lists (they carry a br- class) lose their markers. Lists without one are
+   Markdown content (the Decision editor and view, Messages, the topic): they keep bullets and numbers. */
+.br-root ul[class*="br-"], .br-root ol[class*="br-"] { margin: 0; padding: 0; list-style: none; }
+.br-root ul:not([class*="br-"]) { list-style: disc; padding-left: ${SPACE(6)}; }
+.br-root ol:not([class*="br-"]) { list-style: decimal; padding-left: ${SPACE(6)}; }
+.br-root ul:not([class*="br-"]) ul:not([class*="br-"]) { list-style: circle; }
 .br-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: ${SPACE(3)}; }
 .br-title { font-size: var(--text-xl, 1.25rem); font-weight: 600; line-height: 1.3; font-family: var(--font-heading, inherit); overflow-wrap: anywhere; }
 .br-h2 { font-size: var(--text-sm, 0.875rem); font-weight: 600; }
@@ -88,6 +93,9 @@ textarea.br-input { resize: vertical; min-height: ${SPACE(24)}; }
 .br-from-room-list { position: absolute; top: 100%; left: 0; z-index: 10; display: flex; flex-direction: column; gap: ${SPACE(1)}; min-width: ${SPACE(48)}; margin-top: ${SPACE(1)}; padding: ${SPACE(2)}; border: thin solid var(--border); border-radius: var(--radius-md, 0.375rem); background: var(--card); }
 .br-visually-hidden { position: absolute; width: ${SPACE(0.25)}; height: ${SPACE(0.25)}; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 `;
+
+/** The stylesheet text, exported for tests. */
+export const boardroomCss = css;
 
 export function BoardroomStyles() {
   return <style data-boardroom-styles="">{css}</style>;
