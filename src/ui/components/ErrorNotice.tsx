@@ -17,12 +17,17 @@ export function ErrorNotice({ title, error, onRetry }: { title: string; error: E
   );
 }
 
-/** Says live updates are off, without hiding the page. */
-export function LiveUpdatesNotice({ error }: { error: Error | null }) {
+/**
+ * A small, honest status when the live stream is off. The page then refreshes itself on a timer
+ * (`intervalMs`), so this is information, not a dead end; while the page is hidden the timer is
+ * stopped and `intervalMs` is null.
+ */
+export function LiveUpdatesNotice({ error, intervalMs }: { error: Error | null; intervalMs?: number | null }) {
   if (!error) return null;
+  const every = intervalMs ? ` and checks for changes every ${Math.round(intervalMs / 1000)} seconds` : "";
   return (
-    <p role="status" className="br-notice br-notice-warn br-small">
-      Live updates are off ({error.message}). Reload the page to reconnect.
+    <p role="status" className="br-muted br-small" data-testid="live-updates-notice">
+      Live updates are off ({error.message}). This page refreshes itself{every}.
     </p>
   );
 }

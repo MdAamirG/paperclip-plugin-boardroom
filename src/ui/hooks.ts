@@ -98,3 +98,53 @@ export function useRoomChanged(companyId: string, roomId: string | null): LiveRo
 
   return { tick, streamError: error };
 }
+
+/** How often the page refetches when the live stream is off: while a Round is active, and otherwise. */
+export const POLL_ACTIVE_MS = 5_000;
+export const POLL_IDLE_MS = 30_000;
+
+export interface StreamFallbackPoll {
+  /** Goes up by one on each poll; add it to the live tick to refetch. */
+  tick: number;
+  /** The interval in use, or null when not polling (stream on, or the page hidden). */
+  intervalMs: number | null;
+}
+
+function pageIsVisible(): boolean {
+  try {
+    return typeof document === "undefined" || document.visibilityState !== "hidden";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Keep the page fresh when the live stream is off (the host answers 501 when its stream bridge is
+ * not enabled, or the connection dropped). Polls every `POLL_ACTIVE_MS` while a Round is active and
+ * every `POLL_IDLE_MS` otherwise, stops while the page is hidden and refetches once when it is shown
+ * again. Does nothing while the stream works.
+ */
+export function useStreamFallbackPoll(streamOff: boolean, roundActive: boolean): StreamFallbackPoll {
+  const [tick, setTick] = useState(0);
+  const [visible, setVisible] = useState(pageIsVisible);
+
+  useEffect(() => {
+    if (!streamOff || typeof document === "undefined") return;
+    const onChange = () => {
+      const now = pageIsVisible();
+      setVisible(now);
+      if (now) setTick((value) => value + 1);
+    };
+    document.addEventListener("visibilitychange", onChange);
+    return () => document.removeEventListener("visibilitychange", onChange);
+  }, [streamOff]);
+
+  const intervalMs = streamOff && visible ? (roundActive ? POLL_ACTIVE_MS : POLL_IDLE_MS) : null;
+  useEffect(() => {
+    if (intervalMs === null) return;
+    const timer = setInterval(() => setTick((value) => value + 1), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+
+  return { tick, intervalMs };
+}

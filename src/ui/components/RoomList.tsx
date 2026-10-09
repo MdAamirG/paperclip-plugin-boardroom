@@ -1,7 +1,7 @@
 import { Spinner, StatusBadge, useHostNavigation } from "@paperclipai/plugin-sdk/ui";
 import type { RoomSummary } from "../../api/types.js";
 import { formatTimestamp } from "../format.js";
-import { useAsyncResource, useRoomChanged } from "../hooks.js";
+import { useAsyncResource, useRoomChanged, useStreamFallbackPoll } from "../hooks.js";
 import { useBoardroomClient } from "../api.js";
 import { boardroomPaths } from "../route.js";
 import { ErrorNotice, LiveUpdatesNotice } from "./ErrorNotice.js";
@@ -11,7 +11,8 @@ export function RoomListPage({ companyId }: { companyId: string }) {
   const client = useBoardroomClient(companyId);
   const navigation = useHostNavigation();
   const live = useRoomChanged(companyId, null);
-  const rooms = useAsyncResource(() => client.listRooms(), [client], live.tick);
+  const poll = useStreamFallbackPoll(live.streamError !== null, false);
+  const rooms = useAsyncResource(() => client.listRooms(), [client], live.tick + poll.tick);
 
   const canCreate = rooms.data?.permissions.canPost === true;
   const newRoomLink = (
@@ -28,7 +29,7 @@ export function RoomListPage({ companyId }: { companyId: string }) {
         </h1>
         {canCreate && rooms.data && rooms.data.rooms.length > 0 ? newRoomLink : null}
       </div>
-      <LiveUpdatesNotice error={live.streamError} />
+      <LiveUpdatesNotice error={live.streamError} intervalMs={poll.intervalMs} />
       {rooms.error ? <ErrorNotice title="Could not load Rooms" error={rooms.error} onRetry={rooms.reload} /> : null}
       {rooms.loading ? (
         <p className="br-row" aria-live="polite">

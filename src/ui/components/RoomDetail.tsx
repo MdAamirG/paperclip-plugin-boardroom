@@ -1,8 +1,9 @@
+import { useEffect, useState } from "react";
 import { MarkdownBlock, Spinner, StatusBadge, useHostContext, useHostNavigation } from "@paperclipai/plugin-sdk/ui";
 import type { RoomDetail } from "../../api/types.js";
 import { getProjectName, useBoardroomApi, useBoardroomClient } from "../api.js";
 import { formatTimestamp, shortId } from "../format.js";
-import { useAsyncResource, useRoomChanged } from "../hooks.js";
+import { useAsyncResource, useRoomChanged, useStreamFallbackPoll } from "../hooks.js";
 import { boardroomPaths } from "../route.js";
 import { ComposerRegion } from "../regions/composer.js";
 import { CostStripRegion } from "../regions/cost-strip.js";
@@ -20,7 +21,13 @@ export function RoomDetailPage({ companyId, roomId }: { companyId: string; roomI
   const client = useBoardroomClient(companyId);
   const navigation = useHostNavigation();
   const live = useRoomChanged(companyId, roomId);
-  const room = useAsyncResource(() => client.getRoom(roomId), [client, roomId], live.tick);
+  // The host's stream bridge may be off (501): then poll, faster while a Round is active.
+  const [roundActive, setRoundActive] = useState(false);
+  const poll = useStreamFallbackPoll(live.streamError !== null, roundActive);
+  const refreshKey = live.tick + poll.tick;
+  const room = useAsyncResource(() => client.getRoom(roomId), [client, roomId], refreshKey);
+  const hasActiveRound = room.data?.activeRound != null;
+  useEffect(() => setRoundActive(hasActiveRound), [hasActiveRound]);
 
   const back = (
     <a {...navigation.linkProps(boardroomPaths.list())} className="br-link">
@@ -49,12 +56,12 @@ export function RoomDetailPage({ companyId, roomId }: { companyId: string; roomI
     );
   }
 
-  const regionProps: RegionProps = { companyId, detail: room.data, refreshKey: live.tick, reloadRoom: room.reload };
+  const regionProps: RegionProps = { companyId, detail: room.data, refreshKey, reloadRoom: room.reload };
   return (
     <div className="br-stack">
       {back}
       {room.error ? <ErrorNotice title="Could not refresh this Room" error={room.error} onRetry={room.reload} /> : null}
-      <LiveUpdatesNotice error={live.streamError} />
+      <LiveUpdatesNotice error={live.streamError} intervalMs={poll.intervalMs} />
       <RoomHeader companyId={companyId} detail={room.data} />
       {room.data.room.status === "closed" ? (
         <p className="br-notice br-notice-warn" role="status" data-testid="closed-banner">

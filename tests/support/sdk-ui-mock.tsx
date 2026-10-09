@@ -47,6 +47,8 @@ function createStore() {
     streams: new Map<string, unknown[]>(),
     /** The options of the latest `usePluginStream(channel, options)` call, per channel. */
     streamOptions: new Map<string, { companyId?: string } | undefined>(),
+    /** A connection error per channel (the host answers 501 when its stream bridge is off). */
+    streamErrors: new Map<string, Error>(),
     toasts: [] as PluginToastInput[],
     navigations: [] as string[],
     projects: [] as { id: string; name: string }[],
@@ -72,6 +74,7 @@ function createStore() {
       state.actions.clear();
       state.streams.clear();
       state.streamOptions.clear();
+      state.streamErrors.clear();
       state.toasts.length = 0;
       state.navigations.length = 0;
       state.projects = [];
@@ -91,6 +94,11 @@ function createStore() {
     },
     setAction(key: string, fn: PluginActionFn) {
       state.actions.set(key, fn);
+    },
+    setStreamError(channel: string, error: Error | null) {
+      if (error) state.streamErrors.set(channel, error);
+      else state.streamErrors.delete(channel);
+      changed();
     },
     pushStreamEvent(channel: string, event: unknown) {
       state.streams.set(channel, [...(state.streams.get(channel) ?? []), event]);
@@ -177,7 +185,7 @@ export function usePluginStream<T = unknown>(channel: string, options?: { compan
     lastEvent: events.at(-1) ?? null,
     connecting: false,
     connected: true,
-    error: null,
+    error: sdkUi.state.streamErrors.get(channel) ?? null,
     close: () => {},
   };
 }
