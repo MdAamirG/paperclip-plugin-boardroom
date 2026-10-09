@@ -13,7 +13,9 @@ const ROUNDS = "/rooms/room-1/rounds";
 
 describe("Round progress", () => {
   const renderProgress = (detail = detailFixture()) =>
-    renderWithBoardroom(() => <RoundProgressRegion companyId={COMPANY_ID} detail={detail} refreshKey={0} reloadRoom={() => {}} />);
+    renderWithBoardroom(() => <RoundProgressRegion companyId={COMPANY_ID} detail={detail} refreshKey={0} reloadRoom={() => {}} />, {
+      api: createMockApi().on("GET", ROUNDS, { rounds: [] }),
+    });
 
   it("says no Round is running when there is none", () => {
     renderProgress();

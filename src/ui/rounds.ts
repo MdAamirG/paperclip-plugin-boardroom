@@ -7,7 +7,7 @@ export function turnAgentLabel(turn: Pick<TurnView, "agentName" | "agentId">): s
 }
 
 /** The status of a Turn in words: queued, running, or how it finished. */
-export function turnStatusText(turn: Pick<TurnView, "status" | "outcome">): string {
+export function turnStatusText(turn: Pick<TurnView, "status" | "outcome"> & Partial<Pick<TurnView, "skipReason">>): string {
   if (turn.status === "queued") return "Waiting";
   if (turn.status === "running") return "Answering…";
   switch (turn.outcome) {
@@ -18,7 +18,7 @@ export function turnStatusText(turn: Pick<TurnView, "status" | "outcome">): stri
     case "failed":
       return "Failed";
     case "skipped":
-      return "Skipped";
+      return turn.skipReason === "stopped" ? "Stopped" : "Skipped";
     default:
       return "Finished";
   }

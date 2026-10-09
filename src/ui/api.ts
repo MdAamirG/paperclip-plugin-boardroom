@@ -8,9 +8,11 @@ import type {
   RemoveWorkLinkResponse,
   RoomDetail,
   RoomListResponse,
+  RoundControlResponse,
   RoundListResponse,
   SendMessageRequest,
   SendMessageResponse,
+  StopRoundResponse,
   UpdateDecisionRequest,
   WorkLinkView,
 } from "../api/types.js";
@@ -29,6 +31,8 @@ export interface BoardroomApi {
   delete<T>(path: string, query?: Record<string, string>): Promise<T>;
   /** GET on the host's own board API (`/api/...`), for company data the plugin routes do not own (agents, projects, issues). */
   getHost<T>(path: string, query?: Record<string, string>): Promise<T>;
+  /** POST on the host's own board API (`/api/...`), authorized by the logged-in user's session (used to cancel a run). */
+  postHost<T>(path: string, body?: unknown): Promise<T>;
 }
 
 /**
@@ -104,6 +108,7 @@ export function createBoardroomApi(options: BoardroomApiOptions = {}): Boardroom
     patch: (path, body) => call("PATCH", path, body),
     delete: (path, query) => call("DELETE", path, undefined, query),
     getHost: (path, query) => call("GET", path, undefined, query, "/api"),
+    postHost: (path, body) => call("POST", path, body, undefined, "/api"),
   };
 }
 
@@ -129,9 +134,10 @@ export interface BoardroomClient {
   /** The Room's Rounds, newest first, each with its Turns. */
   listRounds(roomId: string): Promise<RoundListResponse>;
   getCosts<T = unknown>(roomId: string): Promise<T>;
-  pauseRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
-  resumeRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
-  stopRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
+  pauseRound(roomId: string, roundId: string): Promise<RoundControlResponse>;
+  resumeRound(roomId: string, roundId: string): Promise<RoundControlResponse>;
+  /** Stop the Round; `cancel: "fallback"` means the page must cancel `fallbackRunId` (see `cancelHostRun`). */
+  stopRound(roomId: string, roundId: string): Promise<StopRoundResponse>;
   /** Close the Room (no Round may be active); answers with the Room detail. */
   closeRoom(roomId: string): Promise<RoomDetail>;
   /** Save the Decision record (an empty string clears it); answers with the Room detail. */
@@ -196,6 +202,11 @@ export function useBoardroomApi(): BoardroomApi {
   if (provided) return provided;
   defaultApi ??= createBoardroomApi();
   return defaultApi;
+}
+
+/** Cancel a run through the host's board route, as the logged-in user (the Stop fallback when the host has no session cancel). */
+export function cancelHostRun(api: BoardroomApi, runId: string): Promise<unknown> {
+  return api.postHost(`/heartbeat-runs/${encodeURIComponent(runId)}/cancel`);
 }
 
 /** The few fields of the host's agent record the Boardroom UI reads. */

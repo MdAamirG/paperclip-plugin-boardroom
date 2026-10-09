@@ -59,6 +59,7 @@ export function createMockApi(): MockBoardroomApi {
     patch: (path, body) => call("PATCH", path, body),
     delete: (path, query) => call("DELETE", path, undefined, query),
     getHost: (path, query) => call("GET", `host:${path}`, undefined, query),
+    postHost: (path, body) => call("POST", `host:${path}`, body),
   };
   return api;
 }
