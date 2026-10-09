@@ -14,6 +14,8 @@ function renderRoom(api: MockBoardroomApi, roomId = "room-1") {
     api.on("GET", `/rooms/${id}/messages`, { messages: [], hasMore: false });
     api.on("GET", `/rooms/${id}/rounds`, { rounds: [] });
   }
+  // The Participant panel (with control) loads the company's agents for its picker.
+  api.on("GET", "host:/companies/company-1/agents", []);
   sdkUi.setLocation(`/C1/boardroom/${roomId}`);
   return renderWithBoardroom((context) => <BoardroomPage context={context} />, { api });
 }

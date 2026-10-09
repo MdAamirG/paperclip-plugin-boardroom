@@ -24,8 +24,8 @@ import { isUuid, optionalId, readBody, requiredString } from "./validation.js";
 import { toRoundViews } from "./round-view.js";
 import { listWorkLinkViews } from "./work-view.js";
 
-const TITLE_MAX = 200;
-const TOPIC_MAX = 10_000;
+export const TITLE_MAX = 200;
+export const TOPIC_MAX = 10_000;
 
 /** A Room of this company, or 404. A malformed id is a 404 too (it cannot name a Room). */
 export async function loadRoom(ctx: PluginContext, companyId: string, roomId: string | undefined): Promise<Room> {

@@ -128,3 +128,46 @@ export async function setRoomDecision(
   );
   return rowCount > 0;
 }
+
+/** True when the Room has a Round that is `running` or `paused`; used to guard edits in the statement itself. */
+const NO_ACTIVE_ROUND = (db: Db) =>
+  `NOT EXISTS (SELECT 1 FROM ${table(db, "rounds")} rd
+               WHERE rd.company_id = rooms.company_id AND rd.room_id = rooms.id AND rd.status IN ('running', 'paused'))`;
+
+export interface RoomSettingsPatch {
+  title?: string;
+  topic?: string;
+  maxTotalTurns?: number;
+}
+
+/**
+ * Change the title, topic and/or turn cap of an open Room that has no active Round, in ONE guarded
+ * statement (a Round that starts after the caller's check makes it match nothing). Bumps
+ * `updated_at`. Returns false when the guard refused it; the caller re-reads to say why.
+ */
+export async function updateRoomSettings(db: Db, companyId: string, roomId: string, patch: RoomSettingsPatch): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "rooms")} AS rooms
+        SET title = coalesce($3::text, title),
+            topic = coalesce($4::text, topic),
+            max_total_turns = coalesce($5::integer, max_total_turns),
+            updated_at = now()
+      WHERE company_id = $1 AND id = $2 AND status = 'open' AND ${NO_ACTIVE_ROUND(db)}`,
+    [companyId, roomId, patch.title ?? null, patch.topic ?? null, patch.maxTotalTurns ?? null],
+  );
+  return rowCount > 0;
+}
+
+/**
+ * Close an open Room that has no active Round (`status` and `closed_at` together, as the check
+ * constraint needs). Returns false when the guard refused it (already closed, or a Round is active).
+ */
+export async function closeRoomRow(db: Db, companyId: string, roomId: string): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "rooms")} AS rooms
+        SET status = 'closed', closed_at = now(), updated_at = now()
+      WHERE company_id = $1 AND id = $2 AND status = 'open' AND ${NO_ACTIVE_ROUND(db)}`,
+    [companyId, roomId],
+  );
+  return rowCount > 0;
+}
