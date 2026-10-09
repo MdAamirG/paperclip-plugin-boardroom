@@ -1,5 +1,6 @@
 import type { RoundView } from "../../api/types.js";
-import { turnAgentLabel, turnStatusText } from "../rounds.js";
+import { TurnCost } from "../components/TurnCost.js";
+import { turnAgentLabel, turnSkipText, turnStatusText } from "../rounds.js";
 import { Placeholder, RegionFrame, type RegionProps } from "./frame.js";
 
 /**
@@ -31,6 +32,11 @@ function ActiveRound({ round }: { round: RoundView }) {
             <span className="br-turn-agent">{turnAgentLabel(turn)}</span>{" "}
             <span className="br-muted">{turnStatusText(turn)}</span>
             {turn.hostMessage ? <> <span className="br-muted br-small">{turn.hostMessage}</span></> : null}
+            {turn.outcome === "skipped" ? (
+              <> <span className="br-muted br-small" data-skip-reason>{turnSkipText(turn)}</span></>
+            ) : turn.status === "finished" || turn.cost.events > 0 ? (
+              <> <TurnCost cost={turn.cost} /></>
+            ) : null}
           </li>
         ))}
       </ol>

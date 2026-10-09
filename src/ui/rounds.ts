@@ -23,3 +23,16 @@ export function turnStatusText(turn: Pick<TurnView, "status" | "outcome">): stri
       return "Finished";
   }
 }
+
+/** Why a Turn was skipped, in words; empty for a Turn that was not skipped. */
+export function turnSkipText(turn: Pick<TurnView, "outcome" | "skipReason">): string {
+  if (turn.outcome !== "skipped") return "";
+  switch (turn.skipReason) {
+    case "not_invokable":
+      return "the agent cannot be woken";
+    case "stopped":
+      return "the Round was stopped";
+    default:
+      return "";
+  }
+}

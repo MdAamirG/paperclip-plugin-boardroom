@@ -36,9 +36,9 @@ describe("Round progress", () => {
     expect(screen.getByText("(3 of 5 turns done)")).toBeInTheDocument();
     const rows = screen.getAllByRole("listitem");
     expect(rows.map((row) => row.textContent)).toEqual([
-      "Ada Replied",
-      "Grace Stayed silent",
-      "Linus Failed adapter crashed",
+      "Ada Replied $0.00",
+      "Grace Stayed silent $0.00",
+      "Linus Failed adapter crashed $0.00",
       "Ken Answering…",
       "Removed agent (a5) Waiting",
     ]);
