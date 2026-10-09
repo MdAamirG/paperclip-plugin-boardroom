@@ -20,6 +20,7 @@ import type {
   StatusBadgeProps,
   MarkdownBlockProps,
   MarkdownEditorProps,
+  AssigneePickerProps,
 } from "@paperclipai/plugin-sdk/ui";
 
 export type * from "@paperclipai/plugin-sdk/ui";
@@ -231,5 +232,23 @@ export function MarkdownEditor({ value, onChange, placeholder, readOnly, onSubmi
         if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onSubmit?.();
       }}
     />
+  );
+}
+
+/** A native select with two fixed choices: an agent (`agent:agent-1`, "Ada") and a user (`user:user-9`). */
+export function AssigneePicker({ value, onChange, placeholder }: AssigneePickerProps) {
+  return (
+    <select
+      aria-label={placeholder ?? "Assignee"}
+      value={value}
+      onChange={(event) => {
+        const [kind, id] = event.target.value.split(":");
+        onChange(event.target.value, { assigneeAgentId: kind === "agent" ? id : null, assigneeUserId: kind === "user" ? id : null });
+      }}
+    >
+      <option value="">No assignee</option>
+      <option value="agent:agent-1">Ada</option>
+      <option value="user:user-9">Board member</option>
+    </select>
   );
 }

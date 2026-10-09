@@ -7,31 +7,6 @@ import { BoardroomPage } from "../../src/ui/index.js";
 import { COMPANY_ID, detailFixture } from "../support/ui-fixtures.js";
 import { createMockApi, renderWithBoardroom, sdkUi, type MockBoardroomApi } from "../support/ui.js";
 
-// The host provides AssigneePicker and MarkdownEditor at runtime; these stand-ins are queryable.
-vi.mock("@paperclipai/plugin-sdk/ui", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../support/sdk-ui-mock.js")>();
-  return {
-    ...original,
-    AssigneePicker: ({ value, onChange, placeholder }: { value: string; onChange: (value: string, selection: unknown) => void; placeholder?: string }) => (
-      <select
-        aria-label={placeholder ?? "Assignee"}
-        value={value}
-        onChange={(event) => {
-          const [kind, id] = event.target.value.split(":");
-          onChange(event.target.value, { assigneeAgentId: kind === "agent" ? id : null, assigneeUserId: kind === "user" ? id : null });
-        }}
-      >
-        <option value="">No assignee</option>
-        <option value="agent:agent-1">Ada</option>
-        <option value="user:user-9">Board member</option>
-      </select>
-    ),
-    MarkdownEditor: ({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder?: string }) => (
-      <textarea aria-label="Plan editor" placeholder={placeholder} value={value} onChange={(event) => onChange(event.target.value)} />
-    ),
-  };
-});
-
 const ROOM = "room-1";
 const WORK = `/rooms/${ROOM}/work`;
 const LINKS = `/rooms/${ROOM}/work-links`;
@@ -162,7 +137,7 @@ describe("create follow-up work", () => {
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "  Raise prices by 10 percent  " } });
     fireEvent.change(screen.getByLabelText("Description (optional)"), { target: { value: "Roll out in Q1" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Assignee" }), { target: { value: "agent:agent-1" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Plan editor" }), { target: { value: "## Plan\n\n1. Announce" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Write the plan in Markdown" }), { target: { value: "## Plan\n\n1. Announce" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(view.reloadRoom).toHaveBeenCalledTimes(1));
@@ -217,14 +192,14 @@ describe("create follow-up work", () => {
       return { workLink: linkView(), issue: issueView(), planSaved: true };
     });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Do it" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Plan editor" }), { target: { value: "My plan" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Write the plan in Markdown" }), { target: { value: "My plan" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Could not create the task");
     expect(alert).toHaveTextContent("Project must belong to the same company");
     expect(screen.getByLabelText("Title")).toHaveValue("Do it");
-    expect(screen.getByRole("textbox", { name: "Plan editor" })).toHaveValue("My plan");
+    expect(screen.getByRole("textbox", { name: "Write the plan in Markdown" })).toHaveValue("My plan");
     expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
     expect(view.reloadRoom).not.toHaveBeenCalled();
 
@@ -236,7 +211,7 @@ describe("create follow-up work", () => {
     const view = openCreate();
     view.api.on("POST", WORK, { workLink: linkView(), issue: issueView(), planSaved: false, planError: "Document store is down" });
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Do it" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Plan editor" }), { target: { value: "Plan" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Write the plan in Markdown" }), { target: { value: "Plan" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     const notice = await screen.findByRole("status");
     expect(notice).toHaveTextContent("The task PAP-1 was created, but its plan could not be saved: Document store is down");
