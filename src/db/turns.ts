@@ -25,6 +25,8 @@ export interface Turn {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** True while the host part of settling (activity entry, session close, next Turn) is still to do. */
+  hostPending: boolean;
 }
 
 export function mapTurn(row: Row): Turn {
@@ -44,6 +46,7 @@ export function mapTurn(row: Row): Turn {
     createdAt: str(row.created_at),
     startedAt: strOrNull(row.started_at),
     finishedAt: strOrNull(row.finished_at),
+    hostPending: row.host_pending === true,
   };
 }
 
@@ -184,7 +187,7 @@ export async function finishRunningTurn(
 ): Promise<boolean> {
   const { rowCount } = await db.execute(
     `UPDATE ${table(db, "turns")}
-        SET status = 'finished', outcome = $3, finished_at = now(),
+        SET status = 'finished', outcome = $3, finished_at = now(), host_pending = true,
             run_id = COALESCE(run_id, $4::uuid), host_message = $5::text
       WHERE company_id = $1 AND id = $2 AND status = 'running'`,
     [companyId, turnId, result.outcome, result.runId ?? null, result.hostMessage ?? null],
@@ -224,7 +227,8 @@ export async function skipRunningTurn(
 ): Promise<boolean> {
   const { rowCount } = await db.execute(
     `UPDATE ${table(db, "turns")}
-        SET status = 'finished', outcome = 'skipped', skip_reason = $3, host_message = $4::text, finished_at = now()
+        SET status = 'finished', outcome = 'skipped', skip_reason = $3, host_message = $4::text, finished_at = now(),
+            host_pending = true
       WHERE company_id = $1 AND id = $2 AND status = 'running'`,
     [companyId, turnId, skip.reason, skip.hostMessage ?? null],
   );
@@ -251,6 +255,31 @@ export function getRunningTurn(db: Db, companyId: string, roundId: string): Prom
     db,
     `SELECT * FROM ${table(db, "turns")} WHERE company_id = $1 AND round_id = $2 AND status = 'running'`,
     [companyId, roundId],
+    mapTurn,
+  );
+}
+
+/**
+ * Claim the host part of settling a finished Turn. True for exactly one caller, which then writes
+ * the activity entry, closes the session and advances the Round.
+ */
+export async function claimTurnFinalization(db: Db, companyId: string, turnId: string): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "turns")} SET host_pending = false
+      WHERE company_id = $1 AND id = $2 AND status = 'finished' AND host_pending`,
+    [companyId, turnId],
+  );
+  return rowCount > 0;
+}
+
+/** Finished Turns whose host part is still to do, oldest first. */
+export function listUnfinalizedTurns(db: Db, companyId: string): Promise<Turn[]> {
+  return selectMany(
+    db,
+    `SELECT * FROM ${table(db, "turns")}
+      WHERE company_id = $1 AND status = 'finished' AND host_pending
+      ORDER BY finished_at, id LIMIT 100`,
+    [companyId],
     mapTurn,
   );
 }

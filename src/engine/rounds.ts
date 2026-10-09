@@ -5,7 +5,9 @@ import { touchRoomSafely } from "../api/room-touch.js";
 import { toMessageViews } from "../api/message-view.js";
 import {
   countMessages,
+  claimTurnFinalization,
   countUnfinishedTurns,
+  listUnfinalizedTurns,
   finishRunningTurn,
   getRound,
   getRoom,
@@ -14,6 +16,7 @@ import {
   insertRound,
   insertTurn,
   listActiveParticipants,
+  listIdleRunningRounds,
   listMessagesPage,
   markPostedTurnFailed,
   nextRoundSeq,
@@ -42,6 +45,40 @@ export type TurnSettlement =
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * True when the host refused a call because it was made outside a host invocation (a session event
+ * callback, a job) for a company without a plugin configuration row. That is a plugin-side
+ * problem, never a statement about the agent.
+ */
+export function isScopeRefusal(error: unknown): boolean {
+  return /invocation scope/i.test(errorMessage(error));
+}
+
+/**
+ * True when the host refused to run the agent itself: budget, paused, not invokable, gone, or
+ * skipped by its wake policy. Only these make a Turn `skipped`; any other error is a failure.
+ */
+export function isAgentRefusal(error: unknown): boolean {
+  if (isScopeRefusal(error)) return false;
+  return /not invokable|no longer exists|paused|budget|wakeup was skipped|over (the )?limit|spending limit/i.test(errorMessage(error));
+}
+
+/**
+ * Whether the host accepts calls for this company from the current context. The host admits a
+ * worker call that names a company only inside an invocation for that company (an API request, a
+ * run event handler) or when the company has a plugin configuration row; a session event callback
+ * and a job handler are neither. Boardroom has no settings, so there is usually no row. One
+ * cheap read tells which case this is; an error that is not a scope refusal counts as accepted.
+ */
+export async function hostAcceptsCalls(ctx: PluginContext, companyId: string): Promise<boolean> {
+  try {
+    await ctx.agents.list({ companyId, limit: 1 });
+    return true;
+  } catch (error) {
+    return !isScopeRefusal(error);
+  }
 }
 
 /**
@@ -152,34 +189,21 @@ async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promi
     return true;
   } catch (error) {
     ctx.logger.warn("Boardroom could not run a Turn", { turnId: turn.id, error: errorMessage(error) });
-    // A rejected send (budget, paused agent, not invokable) is a skipped Turn with the host's own words.
-    await skipTurn(ctx, companyId, turn.id, errorMessage(error));
+    if (isAgentRefusal(error)) {
+      // A rejected send (budget, paused agent, not invokable) is a skipped Turn with the host's own words.
+      await skipTurn(ctx, companyId, turn.id, errorMessage(error));
+    } else {
+      // Anything else (a scope error, a host fault) is a failed Turn with the real error text, not a claim about the agent.
+      await settleTurn(ctx, companyId, turn.id, { outcome: "failed", hostMessage: errorMessage(error) }, { advance: false });
+    }
     return false;
   }
 }
 
-/** Skip a running Turn whose session or send the host rejected: no run started, so it is not counted. */
+/** Skip a running Turn whose session or send the host refused: no run started, so it is not counted. */
 async function skipTurn(ctx: PluginContext, companyId: string, turnId: string, hostMessage: string): Promise<void> {
   if (!(await skipRunningTurn(ctx.db, companyId, turnId, { reason: "not_invokable", hostMessage }))) return;
-  const turn = await getTurn(ctx.db, companyId, turnId);
-  if (!turn) return;
-  const round = await getRound(ctx.db, companyId, turn.roundId);
-  if (!round) return;
-  await audit(ctx, {
-    companyId,
-    actingUserId: null,
-    roomId: round.roomId,
-    message: "Turn skipped",
-    metadata: { roundId: round.id, turnId, agentId: turn.agentId, outcome: "skipped", skipReason: "not_invokable", hostMessage },
-  });
-  if (turn.sessionId) {
-    try {
-      await ctx.agents.sessions.close(turn.sessionId, companyId);
-    } catch (error) {
-      ctx.logger.warn("Boardroom could not close a session", { turnId, sessionId: turn.sessionId, error: errorMessage(error) });
-    }
-  }
-  announceRoomChanged(ctx, companyId, round.roomId);
+  await finalizeTurn(ctx, companyId, turnId, { advance: false });
 }
 
 async function agentLabel(ctx: PluginContext, companyId: string, agentId: string): Promise<{ name: string; role: string | null }> {
@@ -294,6 +318,32 @@ export async function settleTurn(
     }
   }
 
+  await finalizeTurn(ctx, companyId, turnId, { advance: options.advance !== false });
+  return true;
+}
+
+/**
+ * The host part of settling a finished Turn: the activity entry, closing the session, the live
+ * update and advancing the Round. These are worker-to-host calls, which the host admits only
+ * inside an invocation for the company (or for a company with a plugin configuration row). A
+ * live session event is neither, so there the Turn stays `host_pending` and a later signal that
+ * is inside an invocation (a run event, an API request) or the sweep finishes it. Done once: the
+ * `host_pending` claim decides. Returns true when this call did it.
+ */
+export async function finalizeTurn(
+  ctx: PluginContext,
+  companyId: string,
+  turnId: string,
+  options: { advance?: boolean } = {},
+): Promise<boolean> {
+  if (!(await hostAcceptsCalls(ctx, companyId))) return false;
+  if (!(await claimTurnFinalization(ctx.db, companyId, turnId))) return false;
+  const turn = await getTurn(ctx.db, companyId, turnId);
+  if (!turn) return true;
+  const round = await getRound(ctx.db, companyId, turn.roundId);
+  if (!round) return true;
+
+  const outcome = turn.outcome ?? "failed";
   await audit(ctx, {
     companyId,
     actingUserId: null,
@@ -305,8 +355,9 @@ export async function settleTurn(
       agentId: turn.agentId,
       runId: turn.runId,
       outcome,
-      messageId,
-      ...(hostMessage ? { hostMessage } : {}),
+      messageId: turn.messageId,
+      ...(turn.skipReason ? { skipReason: turn.skipReason } : {}),
+      ...(turn.hostMessage ? { hostMessage: turn.hostMessage } : {}),
     },
   });
 
@@ -320,4 +371,22 @@ export async function settleTurn(
   announceRoomChanged(ctx, companyId, round.roomId);
   if (options.advance !== false) await advanceRound(ctx, companyId, round.id);
   return true;
+}
+
+/**
+ * Finish whatever the host part still owes for a company: settled Turns first, then every
+ * `running` Round with nothing in flight. Call it only from a context the host accepts (a run
+ * event handler, an API request) or from the sweep, which probes first. Never throws.
+ */
+export async function finishPendingHostWork(ctx: PluginContext, companyId: string): Promise<void> {
+  try {
+    const turns = await listUnfinalizedTurns(ctx.db, companyId);
+    const rounds = await listIdleRunningRounds(ctx.db, companyId);
+    if (turns.length === 0 && rounds.length === 0) return;
+    if (!(await hostAcceptsCalls(ctx, companyId))) return;
+    for (const turn of turns) await finalizeTurn(ctx, companyId, turn.id);
+    for (const round of rounds) await advanceRound(ctx, companyId, round.id);
+  } catch (error) {
+    ctx.logger.error("Boardroom could not finish pending host work", { companyId, error: errorMessage(error) });
+  }
 }

@@ -32,7 +32,7 @@ export function getRunSnapshot(db: Db, companyId: string, runId: string): Promis
  */
 export async function listCompaniesWithUnsettledRows(db: Db): Promise<string[]> {
   const rows = await db.query<Row>(
-    `SELECT company_id FROM ${table(db, "turns")} WHERE status = 'running' OR (status = 'finished' AND outcome = 'posted' AND message_id IS NULL)
+    `SELECT company_id FROM ${table(db, "turns")} WHERE status = 'running' OR (status = 'finished' AND (host_pending OR (outcome = 'posted' AND message_id IS NULL)))
      UNION
      SELECT company_id FROM ${table(db, "rounds")} WHERE status = 'running'`,
   );

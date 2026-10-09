@@ -12,7 +12,6 @@ import {
   insertMessage,
   isRunTerminal,
   listCompaniesWithUnsettledRows,
-  listIdleRunningRounds,
   listPostedTurnsWithoutMessage,
   listRunningTurns,
   markPostedTurnFailed,
@@ -20,7 +19,7 @@ import {
   type RunSnapshot,
   type Turn,
 } from "../db/index.js";
-import { advanceRound, settleTurn, type TurnSettlement } from "./rounds.js";
+import { finishPendingHostWork, settleTurn, type TurnSettlement } from "./rounds.js";
 
 /** A `running` Turn with no run id after this long never reached the host (the worker died mid-start): it is failed. */
 export const STALE_DISPATCH_SECONDS = 300;
@@ -66,7 +65,13 @@ export async function handleRunEvent(ctx: PluginContext, event: PluginEvent): Pr
   const runId = isUuid(payload.runId) ? payload.runId : isUuid(event.entityId) ? event.entityId : null;
   if (!runId || !event.companyId) return;
   const turn = await findTurnByRunId(ctx.db, event.companyId, runId);
-  if (!turn || turn.status !== "running") return;
+  if (!turn) return;
+  if (turn.status !== "running") {
+    // Settled already (the live event wins). This handler runs inside an invocation for the company, which
+    // the live event callback did not: finish the host part (activity entry, session close, next Turn).
+    await finishPendingHostWork(ctx, event.companyId);
+    return;
+  }
 
   let settlement: TurnSettlement;
   if (event.eventType === "agent.run.finished") {
@@ -77,6 +82,7 @@ export async function handleRunEvent(ctx: PluginContext, event: PluginEvent): Pr
     settlement = { outcome: "failed", runId, hostMessage: error };
   }
   await settleTurn(ctx, event.companyId, turn.id, settlement);
+  await finishPendingHostWork(ctx, event.companyId);
 }
 
 /**
@@ -111,13 +117,10 @@ async function sweepCompany(ctx: PluginContext, companyId: string): Promise<void
       ctx.logger.error("Boardroom sweep could not repair a Turn", { turnId: turn.id, error: errorMessage(error) });
     }
   }
-  for (const round of await listIdleRunningRounds(ctx.db, companyId)) {
-    try {
-      await advanceRound(ctx, companyId, round.id);
-    } catch (error) {
-      ctx.logger.error("Boardroom sweep could not advance a Round", { roundId: round.id, error: errorMessage(error) });
-    }
-  }
+  // The host part of settled Turns, then every Round with nothing in flight. A job runs outside any
+  // invocation, so for a company without a plugin configuration row this is skipped until a run event
+  // or an API request (inside an invocation) does it.
+  await finishPendingHostWork(ctx, companyId);
 }
 
 async function sweepRunningTurn(ctx: PluginContext, companyId: string, turn: Turn): Promise<void> {
