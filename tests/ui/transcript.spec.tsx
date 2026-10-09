@@ -7,9 +7,11 @@ import { COMPANY_ID, detailFixture, messageFixture } from "../support/ui-fixture
 import { createMockApi, renderWithBoardroom, type ApiCall, type MockBoardroomApi } from "../support/ui.js";
 
 const PATH = "/rooms/room-1/messages";
+const ROUNDS = "/rooms/room-1/rounds";
 const msg = (n: number, overrides = {}) => messageFixture({ id: `m${n}`, body: `Body ${n}`, ...overrides });
 
 function renderTranscript(api: MockBoardroomApi, props: { refreshKey?: number; detail?: ReturnType<typeof detailFixture> } = {}) {
+  if (!api.has("GET", ROUNDS)) api.on("GET", ROUNDS, { rounds: [] });
   const build = (refreshKey: number) => (
     <TranscriptRegion companyId={COMPANY_ID} detail={props.detail ?? detailFixture()} refreshKey={refreshKey} reloadRoom={() => {}} />
   );

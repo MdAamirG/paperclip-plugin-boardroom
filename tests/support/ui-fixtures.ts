@@ -1,5 +1,5 @@
 /** Builders for the API shapes the UI tests mock. */
-import type { MessageView, Room, RoomDetail, RoomSummary } from "../../src/api/types.js";
+import type { MessageView, Room, RoomDetail, RoomSummary, RoundView, TurnView } from "../../src/api/types.js";
 import type { HostAgent } from "../../src/ui/api.js";
 
 export const COMPANY_ID = "company-1";
@@ -68,5 +68,44 @@ export function messageFixture(overrides: Partial<MessageView> = {}): MessageVie
     turnId: null,
     runId: null,
     ...overrides,
+  };
+}
+
+export function turnFixture(overrides: Partial<TurnView> = {}): TurnView {
+  return {
+    id: "t1",
+    roundId: "r1",
+    agentId: "agent-1",
+    agentName: "Ada",
+    ord: 1,
+    status: "queued",
+    outcome: null,
+    skipReason: null,
+    hostMessage: null,
+    runId: null,
+    messageId: null,
+    startedAt: null,
+    finishedAt: null,
+    ...overrides,
+  };
+}
+
+export function roundFixture(overrides: Partial<RoundView> = {}): RoundView {
+  const turns = overrides.turns ?? [turnFixture()];
+  return {
+    id: "r1",
+    companyId: COMPANY_ID,
+    roomId: "room-1",
+    seq: 1,
+    startedByUserId: "user-owner-1",
+    triggerMessageId: "m1",
+    askAll: false,
+    addressedAgentIds: turns.map((t) => t.agentId),
+    status: "running",
+    createdAt: "2026-10-01T09:00:00.000Z",
+    updatedAt: "2026-10-01T09:00:00.000Z",
+    endedAt: null,
+    ...overrides,
+    turns,
   };
 }

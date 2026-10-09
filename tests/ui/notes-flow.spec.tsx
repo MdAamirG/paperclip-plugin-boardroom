@@ -13,6 +13,7 @@ describe("Room page: notes and transcript", () => {
     const stored = [messageFixture({ id: "m1", body: "Earlier note" })];
     const api = createMockApi()
       .on("GET", ROOM, detailFixture())
+      .on("GET", "/rooms/room-1/rounds", { rounds: [] })
       .on("GET", MESSAGES, (call: ApiCall) =>
         call.query?.after ? { messages: stored.filter((m) => m.id > call.query!.after!), hasMore: false } : { messages: stored, hasMore: false },
       )
@@ -40,6 +41,7 @@ describe("Room page: notes and transcript", () => {
   it("lets a viewer read the transcript but gives no composer", async () => {
     const api = createMockApi()
       .on("GET", ROOM, detailFixture({ permissions: { role: "viewer", canPost: false, canControl: false } }))
+      .on("GET", "/rooms/room-1/rounds", { rounds: [] })
       .on("GET", MESSAGES, { messages: [messageFixture({ id: "m1", body: "Readable" })], hasMore: false });
     sdkUi.setLocation("/C1/boardroom/room-1");
     renderWithBoardroom((context) => <BoardroomPage context={context} />, { api });

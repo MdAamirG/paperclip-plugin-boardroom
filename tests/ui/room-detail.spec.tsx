@@ -10,7 +10,10 @@ const REGIONS = ["round-progress", "transcript", "composer", "participants", "co
 
 function renderRoom(api: MockBoardroomApi, roomId = "room-1") {
   // The transcript region loads its own data; these tests are about the shell, so every Room has an empty one.
-  for (const id of ["room-1", "room-2"]) api.on("GET", `/rooms/${id}/messages`, { messages: [], hasMore: false });
+  for (const id of ["room-1", "room-2"]) {
+    api.on("GET", `/rooms/${id}/messages`, { messages: [], hasMore: false });
+    api.on("GET", `/rooms/${id}/rounds`, { rounds: [] });
+  }
   sdkUi.setLocation(`/C1/boardroom/${roomId}`);
   return renderWithBoardroom((context) => <BoardroomPage context={context} />, { api });
 }

@@ -70,10 +70,16 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
   const [trigger, setTrigger] = useState<MentionTrigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
+  // Mentioning starts a Round, which needs control: without it there is no picker, only a note.
+  const canStartRound = detail.permissions.canControl;
+  const activeRound = detail.activeRound;
   // Only Participants that have a name can be written into the text.
   const participants = useMemo(
-    () => detail.participants.filter((p): p is typeof p & { name: string } => typeof p.name === "string" && p.name.trim() !== ""),
-    [detail.participants],
+    () =>
+      canStartRound
+        ? detail.participants.filter((p): p is typeof p & { name: string } => typeof p.name === "string" && p.name.trim() !== "")
+        : [],
+    [detail.participants, canStartRound],
   );
   const options = useMemo(() => {
     if (!trigger) return [];
@@ -156,8 +162,8 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
     } catch (cause) {
       const failure = toError(cause);
       setError(failure);
-      // A Room closed in the meantime: refetch the Room so this form gives way to the read-only notice.
-      if ((failure as { code?: unknown }).code === "room_closed") reloadRoom();
+      // A Room closed or a Round started in the meantime (or our rights changed): refetch the Room so the form matches.
+      if (["room_closed", "round_active", "round_not_allowed"].includes(String((failure as { code?: unknown }).code))) reloadRoom();
     } finally {
       sending.current = false;
       setBusy(false);
@@ -199,6 +205,9 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
   };
 
   const tooLong = draft.trim().length > COMPOSER_BODY_MAX;
+  const mentionedNames = picked.filter((m) => currentMentions(draft).includes(m.agentId)).map((m) => m.name);
+  const startsRound = mentionedNames.length > 0 && activeRound === null;
+  const blockedByRound = mentionedNames.length > 0 && activeRound !== null;
   const optionId = (index: number) => `${listId}-${index}`;
 
   return (
@@ -215,7 +224,7 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
           value={draft}
           readOnly={busy}
           rows={4}
-          placeholder="Write a note. Type @ to mention a Participant."
+          placeholder={canStartRound ? "Write a note. Type @ to mention a Participant." : "Write a note."}
           onChange={onChange}
           onKeyDown={onKeyDown}
           onKeyUp={(event) => {
@@ -258,6 +267,20 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
         ) : null}
       </div>
 
+      {canStartRound && !startsRound && !blockedByRound ? (
+        <p className="br-muted br-small">Mention a Participant with @ to ask for their reply. That starts a Round.</p>
+      ) : null}
+      {startsRound ? (
+        <p className="br-notice br-notice-warn" role="status">
+          Sending will start a Round: {mentionedNames.join(", ")} will reply, one after the other.
+        </p>
+      ) : null}
+      {blockedByRound ? (
+        <p className="br-notice br-notice-warn" role="status">
+          A Round is already in progress, so this message cannot mention anyone yet. Remove the mentions to post a note, or wait for the Round to finish.
+        </p>
+      ) : null}
+
       {ignored && ignored.length > 0 ? (
         <div className="br-notice br-notice-warn br-stack" role="status">
           <p>
@@ -280,7 +303,7 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
 
       <div className="br-footer">
         <span className="br-muted br-small">Ctrl+Enter to send</span>
-        <button type="submit" className="br-btn br-btn-primary" disabled={busy || draft.trim() === "" || tooLong}>
+        <button type="submit" className="br-btn br-btn-primary" disabled={busy || draft.trim() === "" || tooLong || blockedByRound}>
           {busy ? "Sending…" : "Send"}
         </button>
       </div>

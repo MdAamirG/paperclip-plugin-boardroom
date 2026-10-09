@@ -8,6 +8,7 @@ import type {
   RemoveWorkLinkResponse,
   RoomDetail,
   RoomListResponse,
+  RoundListResponse,
   SendMessageRequest,
   SendMessageResponse,
   UpdateDecisionRequest,
@@ -124,7 +125,8 @@ export interface BoardroomClient {
   /** One page of the transcript, oldest first: the latest `limit`, or those just before / after a Message id. */
   listMessages(roomId: string, page?: { limit?: number; before?: string; after?: string }): Promise<MessageListResponse>;
   sendMessage(roomId: string, input: Omit<SendMessageRequest, "companyId">): Promise<SendMessageResponse>;
-  listRounds<T = unknown>(roomId: string): Promise<T>;
+  /** The Room's Rounds, newest first, each with its Turns. */
+  listRounds(roomId: string): Promise<RoundListResponse>;
   getCosts<T = unknown>(roomId: string): Promise<T>;
   pauseRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   resumeRound<T = unknown>(roomId: string, roundId: string): Promise<T>;

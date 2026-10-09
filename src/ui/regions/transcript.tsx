@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MarkdownBlock, Spinner, useHostContext } from "@paperclipai/plugin-sdk/ui";
-import type { MessageView } from "../../api/types.js";
+import type { MessageView, RoundView, TurnView } from "../../api/types.js";
 import { useBoardroomClient, type BoardroomClient } from "../api.js";
 import { ErrorNotice } from "../components/ErrorNotice.js";
 import { formatTimestamp, shortId } from "../format.js";
-import { toError } from "../hooks.js";
+import { toError, useAsyncResource } from "../hooks.js";
+import { turnAgentLabel } from "../rounds.js";
 import { RegionFrame, type RegionProps } from "./frame.js";
 import { onMessagePosted } from "./message-bus.js";
 
@@ -153,6 +154,57 @@ function useTranscript(client: BoardroomClient, roomId: string, refreshKey: numb
   return { ...state, loadEarlier, retry };
 }
 
+/** A finished Turn that left no Message (silent, failed or skipped), shown inline where it ended. */
+interface TurnMarker {
+  turn: TurnView;
+  round: RoundView;
+  at: string;
+}
+
+const MARKER_TEXT: Record<string, string> = {
+  silent: "stayed silent",
+  failed: "could not answer (the Turn failed)",
+  skipped: "was skipped",
+};
+
+/**
+ * The markers to show among the loaded Messages. A marker goes after the last Message that is
+ * not newer than the Turn's end. One that ended before the oldest loaded Message is left out
+ * until the earlier Messages are loaded, so it never floats above its context.
+ */
+function turnMarkers(rounds: readonly RoundView[], messages: readonly MessageView[], hasEarlier: boolean): TurnMarker[] {
+  const oldest = messages[0]?.createdAt;
+  const markers: TurnMarker[] = [];
+  for (const round of rounds) {
+    for (const turn of round.turns) {
+      if (turn.status !== "finished" || !turn.finishedAt || turn.outcome === "posted" || turn.outcome === null) continue;
+      if (hasEarlier && oldest !== undefined && Date.parse(turn.finishedAt) < Date.parse(oldest)) continue;
+      markers.push({ turn, round, at: turn.finishedAt });
+    }
+  }
+  return markers.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+type TranscriptItem = { kind: "message"; message: MessageView } | { kind: "marker"; marker: TurnMarker };
+
+/** Merge Messages and markers by time; a Message wins a tie, so a marker never precedes the Message it follows. */
+function interleave(messages: readonly MessageView[], markers: readonly TurnMarker[]): TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  let next = 0;
+  for (const message of messages) {
+    while (next < markers.length && Date.parse(markers[next]!.at) < Date.parse(message.createdAt)) {
+      items.push({ kind: "marker", marker: markers[next]! });
+      next += 1;
+    }
+    items.push({ kind: "message", message });
+  }
+  while (next < markers.length) {
+    items.push({ kind: "marker", marker: markers[next]! });
+    next += 1;
+  }
+  return items;
+}
+
 /** Who wrote a Message, as shown on its label. */
 function authorLabel(message: MessageView, currentUserId: string | null | undefined): string {
   if (message.authorKind === "agent") return message.authorName ?? `Removed agent (${shortId(message.authorId)})`;
@@ -161,11 +213,35 @@ function authorLabel(message: MessageView, currentUserId: string | null | undefi
   return message.authorId === "local-board" ? "Board" : `Board user ${shortId(message.authorId)}`;
 }
 
+function MessageArticle({ message, userId, activeAgentIds }: { message: MessageView; userId: string | null | undefined; activeAgentIds: ReadonlySet<string> }) {
+  return (
+    <article className="br-message" data-message-id={message.id} data-author-kind={message.authorKind}>
+      <header className="br-message-head">
+        <strong>{authorLabel(message, userId)}</strong>
+        {message.authorKind === "agent" ? (
+          <span className="br-muted br-small">
+            agent{activeAgentIds.has(message.authorId.toLowerCase()) ? "" : " · no longer in this Room"}
+          </span>
+        ) : null}
+        <time className="br-muted br-small" dateTime={message.createdAt}>
+          {formatTimestamp(message.createdAt)}
+        </time>
+      </header>
+      <MarkdownBlock content={message.body} />
+    </article>
+  );
+}
+
 export function TranscriptRegion({ companyId, detail, refreshKey }: RegionProps) {
   const roomId = detail.room.id;
   const client = useBoardroomClient(companyId);
   const { userId } = useHostContext();
   const transcript = useTranscript(client, roomId, refreshKey);
+  const rounds = useAsyncResource(() => client.listRounds(roomId), [client, roomId], refreshKey);
+  const items = useMemo(
+    () => interleave(transcript.messages, turnMarkers(rounds.data?.rounds ?? [], transcript.messages, transcript.hasEarlier)),
+    [transcript.messages, transcript.hasEarlier, rounds.data],
+  );
   const activeAgentIds = useMemo(() => new Set(detail.participants.map((p) => p.agentId.toLowerCase())), [detail.participants]);
 
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -219,6 +295,7 @@ export function TranscriptRegion({ companyId, detail, refreshKey }: RegionProps)
           {transcript.refreshError ? (
             <ErrorNotice title="Could not refresh the transcript" error={transcript.refreshError} onRetry={transcript.retry} />
           ) : null}
+          {rounds.error ? <ErrorNotice title="Could not load the Turn markers" error={rounds.error} onRetry={rounds.reload} /> : null}
           <div ref={scroller} onScroll={onScroll} className="br-transcript" role="log" aria-label="Transcript" tabIndex={0}>
             {transcript.hasEarlier ? (
               <div className="br-stack">
@@ -233,22 +310,25 @@ export function TranscriptRegion({ companyId, detail, refreshKey }: RegionProps)
             {transcript.messages.length === 0 ? (
               <p className="br-muted">No messages yet.</p>
             ) : (
-              transcript.messages.map((message) => (
-                <article key={message.id} className="br-message" data-message-id={message.id} data-author-kind={message.authorKind}>
-                  <header className="br-message-head">
-                    <strong>{authorLabel(message, userId)}</strong>
-                    {message.authorKind === "agent" ? (
-                      <span className="br-muted br-small">
-                        agent{activeAgentIds.has(message.authorId.toLowerCase()) ? "" : " · no longer in this Room"}
-                      </span>
+              items.map((item) =>
+                item.kind === "marker" ? (
+                  <p
+                    key={`turn-${item.marker.turn.id}`}
+                    className="br-turn-marker"
+                    role="status"
+                    data-turn-id={item.marker.turn.id}
+                    data-turn-outcome={item.marker.turn.outcome ?? ""}
+                  >
+                    <strong>{turnAgentLabel(item.marker.turn)}</strong>{" "}
+                    <span>{MARKER_TEXT[item.marker.turn.outcome ?? ""] ?? "finished"}</span>
+                    {item.marker.turn.outcome === "failed" && item.marker.turn.hostMessage ? (
+                      <span className="br-small">{item.marker.turn.hostMessage}</span>
                     ) : null}
-                    <time className="br-muted br-small" dateTime={message.createdAt}>
-                      {formatTimestamp(message.createdAt)}
-                    </time>
-                  </header>
-                  <MarkdownBlock content={message.body} />
-                </article>
-              ))
+                  </p>
+                ) : (
+                  <MessageArticle key={item.message.id} message={item.message} userId={userId} activeAgentIds={activeAgentIds} />
+                ),
+              )
             )}
           </div>
         </>

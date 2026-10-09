@@ -26,6 +26,8 @@ export interface MockBoardroomApi extends BoardroomApi {
    * host's own board API (`getHost`) are keyed `GET host:<path>`, for example `GET host:/companies/c1/agents`.
    */
   on(method: string, path: string, responder: Responder): MockBoardroomApi;
+  /** Whether `method path` already has an answer. */
+  has(method: string, path: string): boolean;
 }
 
 /** An API client whose routes the test defines. Unmocked routes reject with a 404 `BoardroomApiError`. */
@@ -51,6 +53,7 @@ export function createMockApi(): MockBoardroomApi {
       routes.set(`${method.toUpperCase()} ${path}`, responder);
       return api;
     },
+    has: (method, path) => routes.has(`${method.toUpperCase()} ${path}`),
     get: (path, query) => call("GET", path, undefined, query),
     post: (path, body) => call("POST", path, body),
     patch: (path, body) => call("PATCH", path, body),
