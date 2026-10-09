@@ -6,7 +6,7 @@ import {
   deleteRoom,
   getActiveRound,
   getRoom,
-  insertParticipant,
+  insertInitialParticipants,
   insertRoom,
   insertWorkLink,
   listActiveParticipants,
@@ -45,26 +45,32 @@ export async function buildRoomDetail(ctx: PluginContext, actor: Actor, room: Ro
     getActiveRound(db, room.companyId, room.id),
     listWorkLinks(db, room.companyId, room.id),
   ]);
-  const views: ParticipantView[] = [];
-  for (const participant of participants) {
-    const agent = await ctx.agents.get(participant.agentId, room.companyId);
-    views.push({
-      id: participant.id,
-      agentId: participant.agentId,
-      name: agent?.name ?? null,
-      role: agent?.role ?? null,
-      title: agent?.title ?? null,
-      addedByUserId: participant.addedByUserId,
-      addedAt: participant.addedAt,
-    });
-  }
+  // Fetch the names in parallel. The Room is already committed by now (create calls this after the
+  // writes), so a failed lookup must not turn into a 500: that Participant just has no name.
+  const views: ParticipantView[] = await Promise.all(
+    participants.map(async (participant) => {
+      const agent = await ctx.agents.get(participant.agentId, room.companyId).catch((error: unknown) => {
+        ctx.logger.warn("Boardroom could not look up an agent name", { agentId: participant.agentId, error: errorMessage(error) });
+        return null;
+      });
+      return {
+        id: participant.id,
+        agentId: participant.agentId,
+        name: agent?.name ?? null,
+        role: agent?.role ?? null,
+        title: agent?.title ?? null,
+        addedByUserId: participant.addedByUserId,
+        addedAt: participant.addedAt,
+      };
+    }),
+  );
   return { room, participants: views, activeRound, workLinks, permissions: permissionsFor(actor, room) };
 }
 
 export const listRooms: RouteHandler = async ({ ctx, input, actor }) => {
   requireLevel(actor, "read");
   const rooms = await listRoomSummaries(ctx.db, input.companyId);
-  return ok<RoomListResponse>({ rooms });
+  return ok<RoomListResponse>({ rooms, permissions: { role: actor.role, canPost: canPost(actor) } });
 };
 
 export const getRoomDetail: RouteHandler = async ({ ctx, input, actor }) => {
@@ -91,7 +97,8 @@ function parseCreateBody(body: Record<string, unknown>): ValidatedCreate {
   if (!Array.isArray(rawAgents) || rawAgents.some((id) => typeof id !== "string")) {
     throw badRequest('"agentIds" must be an array of agent ids', { field: "agentIds" });
   }
-  const agentIds = rawAgents as string[];
+  // Ids are compared and stored in lower case, so "ABC..." and "abc..." are one agent.
+  const agentIds = (rawAgents as string[]).map((id) => id.toLowerCase());
   if (agentIds.length > MAX_ACTIVE_PARTICIPANTS) {
     throw unprocessable("too_many_participants", `A Room has at most ${MAX_ACTIVE_PARTICIPANTS} Participants`, {
       limit: MAX_ACTIVE_PARTICIPANTS,
@@ -99,7 +106,7 @@ function parseCreateBody(body: Record<string, unknown>): ValidatedCreate {
     });
   }
   if (agentIds.length === 0) throw unprocessable("participants_required", "Pick at least one agent");
-  if (new Set(agentIds.map((id) => id.toLowerCase())).size !== agentIds.length) {
+  if (new Set(agentIds).size !== agentIds.length) {
     throw unprocessable("duplicate_participant", "An agent can be picked only once");
   }
 
@@ -170,10 +177,10 @@ export const createRoom: RouteHandler = async ({ ctx, input, actor }: RouteConte
     throw new ApiError(500, "internal_error", "The Room could not be created");
   }
   try {
-    // Join order is the order given; each insert is its own statement, so `added_at` increases.
-    for (const agentId of v.agentIds) {
-      await insertParticipant(ctx.db, companyId, { roomId: room.id, agentId, addedByUserId: actor.userId });
-    }
+    // ctx.db has no transactions, so the create is not atomic. Every Participant goes in with ONE
+    // statement (all or none), which leaves one failure window between the Room and its
+    // Participants. Join order is the explicit `position`, the order given.
+    await insertInitialParticipants(ctx.db, companyId, { roomId: room.id, agentIds: v.agentIds, addedByUserId: actor.userId });
     if (v.linkedIssueId !== null) {
       await insertWorkLink(ctx.db, companyId, {
         roomId: room.id,
@@ -183,9 +190,18 @@ export const createRoom: RouteHandler = async ({ ctx, input, actor }: RouteConte
       });
     }
   } catch (error) {
-    // Do not leave a half-built Room behind.
-    await deleteRoom(ctx.db, companyId, room.id).catch(() => undefined);
     ctx.logger.error("Boardroom could not finish creating a Room", { roomId: room.id, error: errorMessage(error) });
+    // Do not leave a half-built Room behind. If even this fails, the Room stays with no
+    // Participants; say so loudly so it can be found (the later sweep removes such Rooms).
+    try {
+      await deleteRoom(ctx.db, companyId, room.id);
+    } catch (rollbackError) {
+      ctx.logger.error("Boardroom could not roll back a half-built Room; it is left without Participants", {
+        roomId: room.id,
+        companyId,
+        error: errorMessage(rollbackError),
+      });
+    }
     throw new ApiError(500, "internal_error", "The Room could not be created");
   }
 
