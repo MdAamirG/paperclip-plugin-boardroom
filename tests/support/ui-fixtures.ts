@@ -39,6 +39,7 @@ export function detailFixture(overrides: Partial<Omit<RoomDetail, "room">> & { r
     ],
     activeRound: null,
     workLinks: [],
+    decision: null,
     permissions: { role: "owner", canPost: true, canControl: true },
     ...rest,
   };

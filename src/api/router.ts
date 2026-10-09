@@ -4,6 +4,7 @@ import type { RouteHandler } from "./context.js";
 import { ApiError, badRequest } from "./errors.js";
 import { isUuid } from "./validation.js";
 import { listRoomMessages, sendMessage } from "./messages.js";
+import { updateDecision } from "./decision.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
 
@@ -17,6 +18,7 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "rooms.get": getRoomDetail,
   "messages.list": listRoomMessages,
   "messages.send": sendMessage,
+  "decision.update": updateDecision,
 };
 
 const KNOWN_ROUTE_KEYS: ReadonlySet<string> = new Set(ROUTE_SPECS.map((spec) => spec.routeKey));

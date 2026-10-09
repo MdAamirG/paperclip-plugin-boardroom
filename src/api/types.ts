@@ -24,6 +24,20 @@ export interface RoomPermissions {
   canControl: boolean;
 }
 
+/** Who wrote the Decision record. `name` is null when the member lookup holds no display name. */
+export interface DecisionWriter {
+  userId: string;
+  name: string | null;
+}
+
+/** The Room's Decision record with its writer and time; the Room detail carries `null` when there is none. */
+export interface DecisionView {
+  markdown: string;
+  writer: DecisionWriter;
+  /** When it was last saved (ISO). */
+  at: string;
+}
+
 export interface RoomDetail {
   room: Room;
   /** Active Participants in join order. */
@@ -31,6 +45,8 @@ export interface RoomDetail {
   /** The running or paused Round, or null. */
   activeRound: Round | null;
   workLinks: WorkLink[];
+  /** The Decision record, or null when none is recorded. */
+  decision: DecisionView | null;
   permissions: RoomPermissions;
 }
 
@@ -103,4 +119,8 @@ export interface SendMessageResponse {
   /** Always null until a Round can start (ticket 06). */
   round: Round | null;
   ignoredMentions: IgnoredMention[];
+export interface UpdateDecisionRequest {
+  companyId: string;
+  /** The markdown; an empty or blank string clears the record. */
+  decisionMd: string;
 }

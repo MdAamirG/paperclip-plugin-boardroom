@@ -7,6 +7,7 @@ import type {
   RoomListResponse,
   SendMessageRequest,
   SendMessageResponse,
+  UpdateDecisionRequest,
 } from "../api/types.js";
 
 /**
@@ -125,7 +126,8 @@ export interface BoardroomClient {
   resumeRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   stopRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   closeRoom<T = unknown>(roomId: string): Promise<T>;
-  updateDecision<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
+  /** Save the Decision record (an empty string clears it); answers with the Room detail. */
+  updateDecision(roomId: string, body: Pick<UpdateDecisionRequest, "decisionMd">): Promise<RoomDetail>;
   createWork<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
   addWorkLink<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
   removeWorkLink<T = unknown>(roomId: string, issueId: string): Promise<T>;
