@@ -3,6 +3,7 @@ import { resolveActor } from "./access.js";
 import type { RouteHandler } from "./context.js";
 import { ApiError, badRequest } from "./errors.js";
 import { isUuid } from "./validation.js";
+import { listRoomMessages, sendMessage } from "./messages.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
 
@@ -14,6 +15,8 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "rooms.list": listRooms,
   "rooms.create": createRoom,
   "rooms.get": getRoomDetail,
+  "messages.list": listRoomMessages,
+  "messages.send": sendMessage,
 };
 
 const KNOWN_ROUTE_KEYS: ReadonlySet<string> = new Set(ROUTE_SPECS.map((spec) => spec.routeKey));
