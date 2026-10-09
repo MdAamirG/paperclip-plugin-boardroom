@@ -230,3 +230,27 @@ export async function skipRunningTurn(
   );
   return rowCount > 0;
 }
+
+/**
+ * Stop: every `queued` Turn of the Round becomes `finished`/`skipped` with `skip_reason = 'stopped'`
+ * (no run ever started, so they do not count toward the cap). Returns how many were skipped.
+ */
+export async function skipQueuedTurnsAsStopped(db: Db, companyId: string, roundId: string): Promise<number> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "turns")}
+        SET status = 'finished', outcome = 'skipped', skip_reason = 'stopped', finished_at = now()
+      WHERE company_id = $1 AND round_id = $2 AND status = 'queued'`,
+    [companyId, roundId],
+  );
+  return rowCount;
+}
+
+/** The Round's `running` Turn, if any. */
+export function getRunningTurn(db: Db, companyId: string, roundId: string): Promise<Turn | null> {
+  return selectOne(
+    db,
+    `SELECT * FROM ${table(db, "turns")} WHERE company_id = $1 AND round_id = $2 AND status = 'running'`,
+    [companyId, roundId],
+    mapTurn,
+  );
+}

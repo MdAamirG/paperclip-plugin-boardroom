@@ -8,6 +8,7 @@ import { updateDecision } from "./decision.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
 import { addParticipant, closeRoom, removeParticipantRoute, updateRoom } from "./room-edits.js";
 import { listRoomRounds } from "./rounds.js";
+import { pauseRoundRoute, resumeRoundRoute, stopRoundRoute } from "./round-controls.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
 import { addWorkLink, createWork, removeWorkLink } from "./work.js";
 
@@ -26,6 +27,9 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "messages.list": listRoomMessages,
   "messages.send": sendMessage,
   "rounds.list": listRoomRounds,
+  "rounds.pause": pauseRoundRoute,
+  "rounds.resume": resumeRoundRoute,
+  "rounds.stop": stopRoundRoute,
   "decision.update": updateDecision,
   "work.create": createWork,
   "work-links.add": addWorkLink,

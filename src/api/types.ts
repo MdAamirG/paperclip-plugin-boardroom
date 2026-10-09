@@ -208,3 +208,19 @@ export interface RemoveWorkLinkResponse {
   removed: true;
   issueId: string;
 }
+
+/** `POST .../rounds/:roundId/pause` and `.../resume`: the Round as it is afterwards. */
+export interface RoundControlResponse {
+  round: RoundView;
+}
+
+/** How the running Turn's run was cancelled by Stop: `host` (the host did), `fallback` (the page must cancel `fallbackRunId`), `none` (no Turn was running), `failed` (the host tried and errored). */
+export type StopCancelResult = "host" | "fallback" | "none" | "failed";
+
+/** `POST .../rounds/:roundId/stop`. */
+export interface StopRoundResponse {
+  round: RoundView;
+  cancel: StopCancelResult;
+  /** Set when `cancel` is `fallback`: the run the page cancels through the board route. */
+  fallbackRunId?: string;
+}
