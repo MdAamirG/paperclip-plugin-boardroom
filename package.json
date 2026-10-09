@@ -1,7 +1,6 @@
 {
   "name": "paperclip-plugin-boardroom",
-  "version": "0.1.0-dev.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "Boardroom: human-led multi-agent discussion Rooms for Paperclip",
   "license": "MIT",
@@ -13,7 +12,9 @@
   ],
   "files": [
     "dist/",
-    "migrations/"
+    "migrations/",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node ./esbuild.config.mjs",

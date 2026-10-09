@@ -5,7 +5,7 @@ import { BOARDROOM_PLUGIN_ID, ROUND_SWEEP_JOB_KEY, BOARDROOM_ROUTE_PATH } from "
 const manifest: PaperclipPluginManifestV1 = {
   id: BOARDROOM_PLUGIN_ID,
   apiVersion: 1,
-  version: "0.1.0-dev.0",
+  version: "0.1.0",
   displayName: "Boardroom",
   description:
     "Human-led discussion Rooms where a board operator and chosen agents work through one decision, then turn it into ordinary Paperclip work.",
