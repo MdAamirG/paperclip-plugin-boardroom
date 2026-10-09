@@ -8,6 +8,7 @@ import type {
   RemoveWorkLinkResponse,
   RoomDetail,
   RoomListResponse,
+  RoomCostsResponse,
   RoundListResponse,
   SendMessageRequest,
   SendMessageResponse,
@@ -128,7 +129,8 @@ export interface BoardroomClient {
   sendMessage(roomId: string, input: Omit<SendMessageRequest, "companyId">): Promise<SendMessageResponse>;
   /** The Room's Rounds, newest first, each with its Turns. */
   listRounds(roomId: string): Promise<RoundListResponse>;
-  getCosts<T = unknown>(roomId: string): Promise<T>;
+  /** Lifetime cost, per-agent split and Turns used against the cap. */
+  getCosts(roomId: string): Promise<RoomCostsResponse>;
   pauseRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   resumeRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   stopRound<T = unknown>(roomId: string, roundId: string): Promise<T>;

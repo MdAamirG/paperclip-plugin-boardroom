@@ -55,6 +55,21 @@ export interface WorkIssueView {
 /** A work link with the issue it points to. `issue` is null when the issue can no longer be read. */
 export type WorkLinkView = WorkLink & { issue: WorkIssueView | null };
 
+/** What a Turn's run cost, summed from the host's cost events. All zero when the run has no cost events (yet). */
+export interface CostFigures {
+  costCents: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+}
+
+/** A Turn's own cost. `subscriptionBilled`: it has cost events and every one is subscription billed with zero cents. */
+export interface TurnCost extends CostFigures {
+  /** Number of cost events behind the figures. */
+  events: number;
+  subscriptionBilled: boolean;
+}
+
 /** One Turn of a Round as the UI shows it. The session id stays inside the plugin. */
 export interface TurnView {
   id: string;
@@ -75,6 +90,7 @@ export interface TurnView {
   messageId: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  cost: TurnCost;
 }
 
 /** A Round with its Turns in order. */
@@ -207,4 +223,36 @@ export interface AddWorkLinkRequest {
 export interface RemoveWorkLinkResponse {
   removed: true;
   issueId: string;
+}
+
+/** Turn counts by outcome. Queued and running Turns have no outcome yet and are in none of these. */
+export interface OutcomeCounts {
+  posted: number;
+  silent: number;
+  failed: number;
+  skipped: number;
+}
+
+/** One agent's share of a Room's cost: every agent that ever had a Turn, removed Participants included. */
+export interface AgentCost extends CostFigures {
+  agentId: string;
+  /** From the agent record; null when the agent no longer exists. */
+  agentName: string | null;
+  isActiveParticipant: boolean;
+  /** Turns with cost events (distinct runs). */
+  runCount: number;
+  outcomes: OutcomeCounts;
+  subscriptionBilled: boolean;
+}
+
+/** `GET /rooms/:roomId/costs`. */
+export interface RoomCostsResponse extends CostFigures {
+  roomId: string;
+  /** Distinct runs with at least one cost event. */
+  runCount: number;
+  subscriptionBilled: boolean;
+  /** Counted Turns (every Turn that was not skipped), as the cap counts them. */
+  turnsUsed: number;
+  maxTotalTurns: number;
+  agents: AgentCost[];
 }
