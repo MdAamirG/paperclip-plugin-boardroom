@@ -78,3 +78,40 @@ export function listRooms(db: Db, companyId: string): Promise<Room[]> {
     mapRoom,
   );
 }
+
+export interface RoomSummary extends Room {
+  /** Active Participants only. */
+  participantCount: number;
+  /** The later of the Room's last update and its latest Message. */
+  lastActivityAt: string;
+}
+
+/** The company's Rooms with Participant count and last activity, newest activity first. */
+export function listRoomSummaries(db: Db, companyId: string): Promise<RoomSummary[]> {
+  return selectMany(
+    db,
+    `SELECT r.*,
+            (SELECT count(*)::int FROM ${table(db, "room_participants")} p
+              WHERE p.company_id = r.company_id AND p.room_id = r.id AND p.removed_at IS NULL) AS participant_count,
+            GREATEST(r.updated_at,
+              coalesce((SELECT max(m.created_at) FROM ${table(db, "room_messages")} m
+                         WHERE m.company_id = r.company_id AND m.room_id = r.id), r.updated_at)) AS last_activity_at
+     FROM ${table(db, "rooms")} r
+     WHERE r.company_id = $1
+     ORDER BY last_activity_at DESC, r.id`,
+    [companyId],
+    (row) => ({ ...mapRoom(row), participantCount: num(row.participant_count), lastActivityAt: str(row.last_activity_at) }),
+  );
+}
+
+/**
+ * Remove a Room and, by cascade, everything under it. Only for rolling back a Room whose creation
+ * failed half way; users never delete Rooms.
+ */
+export async function deleteRoom(db: Db, companyId: string, roomId: string): Promise<boolean> {
+  const { rowCount } = await db.execute(`DELETE FROM ${table(db, "rooms")} WHERE company_id = $1 AND id = $2`, [
+    companyId,
+    roomId,
+  ]);
+  return rowCount > 0;
+}
