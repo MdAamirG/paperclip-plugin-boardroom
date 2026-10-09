@@ -4,7 +4,15 @@ All notable changes to this plugin are recorded here. The format follows [Keep a
 
 ## [0.1.0] - Unreleased
 
-First release. Not yet published to npm and not yet checked by hand on a running Paperclip instance (see `docs/manual-check-0.1.0.md`).
+First release. Not yet published to npm. Checked once by hand on a local Paperclip instance (see `docs/manual-check-0.1.0.md`); the fixes for that check are listed under Fixed.
+
+### Fixed
+
+- A multi-Turn Round no longer stops after the first Turn in a company that has no plugin configuration row (manual check F1). The host refuses worker calls made outside an invocation (a live agent reply, a job) for such a company. Settling a Turn now saves the outcome and reply at once and does the host-side work (activity entry, closing the session, starting the next Turn) from the next context the host accepts: a run event, a page request, or the sweep. Adds migration `002_turn_host_pending.sql`.
+- A refused session start is only a skipped Turn when the host refused the agent itself (not invokable, paused, over budget, gone). Any other error fails the Turn with the real error text (F2).
+- The page polls (5 s during a Round, 30 s otherwise, not while hidden) when the host's live stream is off, and the notice no longer tells the person to reload (F5).
+- Markdown lists keep their bullets and numbers (F8).
+- README: retries, known limits and access notes corrected after the manual check (F3, F4, F7).
 
 ### Added
 
