@@ -19,6 +19,7 @@ import type { PaperclipPlugin, PluginApiRequestInput } from "@paperclipai/plugin
 import { PLUGIN_RPC_ERROR_CODES } from "@paperclipai/plugin-sdk/protocol";
 import type { PaperclipPluginManifestV1, PluginApiRouteDeclaration } from "@paperclipai/shared";
 import { HostHttpError, viaJson } from "./errors.js";
+import { runInInvocation } from "./invocation.js";
 import type { HostRecords } from "./records.js";
 import type { SeededAgent, SeededMember } from "./seeding.js";
 
@@ -281,7 +282,7 @@ export async function dispatchApiRequest<T>(
         });
       }
       // The worker sends `result ?? null`.
-      result = viaJson(await handler(viaJson(input))) ?? null;
+      result = viaJson(await runInInvocation(companyId, () => handler(viaJson(input)))) ?? null;
     } catch (error) {
       throw asWorkerError(error);
     }

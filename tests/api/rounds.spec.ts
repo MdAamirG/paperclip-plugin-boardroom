@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 async function setup(options: { agents?: string[]; maxTotalTurns?: number; title?: string } = {}) {
-  harness = await createBoardroomHarness();
+  harness = await createBoardroomHarness({ everyCompanyConfigured: true });
   const h = harness;
   const company = await h.seedCompany({ agents: options.agents ?? ["CEO", "CTO", "CFO"] });
   const owner = company.members.owner;
@@ -340,7 +340,7 @@ describe("Round rules", () => {
   });
 
   it("lets a Room Owner who is an operator start a Round", async () => {
-    harness = await createBoardroomHarness();
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true });
     const company = await harness.seedCompany({ agents: ["CEO"] });
     const created = await harness.request<RoomDetail>("POST", "/rooms", {
       body: { companyId: company.id, title: "T", topic: "T", agentIds: [company.agents[0]!.id] },

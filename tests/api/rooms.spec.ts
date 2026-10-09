@@ -28,13 +28,13 @@ afterEach(async () => {
 });
 
 async function start(): Promise<BoardroomHarness> {
-  harness = await createBoardroomHarness();
+  harness = await createBoardroomHarness({ everyCompanyConfigured: true });
   return harness;
 }
 
 /** A harness whose manifest also holds `access.members.write`, so a test can change roles. */
 async function startWithMemberWrites(): Promise<BoardroomHarness> {
-  harness = await createBoardroomHarness({
+  harness = await createBoardroomHarness({ everyCompanyConfigured: true,
     manifest: { ...defaultManifest, capabilities: [...defaultManifest.capabilities, "access.members.write"] },
   });
   return harness;
@@ -199,7 +199,7 @@ describe("POST /rooms", () => {
   });
 
   it("applies a role change at once (roles are looked up on every request)", async () => {
-    harness = await createBoardroomHarness({
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true,
       manifest: { ...defaultManifest, capabilities: [...defaultManifest.capabilities, "access.members.write"] },
     });
     const h = harness;

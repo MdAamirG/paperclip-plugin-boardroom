@@ -22,7 +22,7 @@ afterEach(async () => {
 const SCHEMA = "plugin_boardroom_79f8e138fc";
 
 async function setup() {
-  harness = await createBoardroomHarness();
+  harness = await createBoardroomHarness({ everyCompanyConfigured: true });
   const h = harness;
   const company = await h.seedCompany({ agents: ["CEO", "CTO", "CFO"] });
   const owner = company.members.owner;

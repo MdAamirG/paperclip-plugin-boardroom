@@ -20,7 +20,7 @@ afterEach(async () => {
 const NAMES = ["CEO", "CTO", "CFO", "COO", "CMO", "CIO", "CPO", "CSO", "CLO", "CRO"];
 
 async function setup(options: { initial?: number; maxTotalTurns?: number } = {}) {
-  harness = await createBoardroomHarness();
+  harness = await createBoardroomHarness({ everyCompanyConfigured: true });
   const h = harness;
   const company = await h.seedCompany({ agents: NAMES });
   const initial = company.agents.slice(0, options.initial ?? 3);
@@ -345,7 +345,7 @@ describe("access", () => {
   });
 
   it("a Room's operator Owner may edit their own Room", async () => {
-    harness = await createBoardroomHarness();
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true });
     const h = harness;
     const company = await h.seedCompany({ agents: NAMES });
     const created = await h.request<RoomDetail>("POST", "/rooms", {

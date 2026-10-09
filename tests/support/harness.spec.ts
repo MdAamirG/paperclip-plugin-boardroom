@@ -22,13 +22,13 @@ afterEach(async () => {
 
 describe("PGlite database swap", () => {
   it("uses the host-derived namespace name, not the SDK harness's test_* name", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     expect(BOARDROOM_NAMESPACE).toBe("plugin_boardroom_79f8e138fc");
     expect(harness.ctx.db.namespace).toBe(BOARDROOM_NAMESPACE);
   });
 
   it("applies the migration directory in filename order and round-trips a row through ctx.db", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const company = await harness.seedCompany();
 
     // 0002 adds the `pinned` column, so it must run after 0001.
@@ -49,7 +49,7 @@ describe("PGlite database swap", () => {
   });
 
   it("can read whitelisted core tables and their seeded rows", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const company = await harness.seedCompany({ agents: ["CEO", "CTO"] });
     const run = await harness.seedRun({ companyId: company.id, agentId: company.agents[0]!.id, status: "succeeded" });
     await harness.seedCostEvent({ companyId: company.id, agentId: company.agents[0]!.id, runId: run.id, costCents: 42 });
@@ -69,7 +69,7 @@ describe("PGlite database swap", () => {
   });
 
   it("reports a failed statement as the host does: drizzle's 'Failed query' message, no constraint name", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const company = await harness.seedCompany();
     const id = "6f1d1a52-8d5c-4b8e-9d1e-0a6a2a1f9b11";
     const insert = `INSERT INTO ${NOTES_TABLE} (id, company_id, body) VALUES ($1, $2, $3)`;
@@ -81,7 +81,7 @@ describe("PGlite database swap", () => {
   });
 
   it("refuses a runtime CREATE TABLE", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     await expect(
       harness.ctx.db.execute(`CREATE TABLE ${BOARDROOM_NAMESPACE}.sneaky (id int)`),
     ).rejects.toThrow(/only allows INSERT, UPDATE, or DELETE/);
@@ -91,7 +91,7 @@ describe("PGlite database swap", () => {
   });
 
   it("refuses a write outside the plugin namespace", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const company = await harness.seedCompany();
     await expect(
       harness.ctx.db.execute("UPDATE public.agents SET name = 'x' WHERE company_id = $1", [company.id]),
@@ -101,7 +101,7 @@ describe("PGlite database swap", () => {
   });
 
   it("refuses a non-SELECT query", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const company = await harness.seedCompany();
     await expect(
       harness.ctx.db.query(`DELETE FROM ${NOTES_TABLE} WHERE company_id = $1`, [company.id]),
@@ -109,20 +109,20 @@ describe("PGlite database swap", () => {
   });
 
   it("refuses a read of a core table the manifest does not whitelist", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     await expect(harness.ctx.db.query("SELECT id FROM public.issues")).rejects.toThrow(/not whitelisted/);
   });
 
   it("rejects a migration that writes outside the namespace", async () => {
     await expect(
-      createBoardroomHarness({ migrationsDir: new URL("../fixtures/bad-migrations/", import.meta.url) }),
+      createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: new URL("../fixtures/bad-migrations/", import.meta.url) }),
     ).rejects.toThrow(/cannot mutate or define objects in public\.agents|not whitelisted/);
   });
 });
 
 describe("seed helpers", () => {
   it("seeds a company with agents and one member per role into the SDK harness", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const company = await harness.seedCompany({ agents: ["CEO"] });
 
     const members = await harness.ctx.access.members.list({ companyId: company.id });
@@ -136,7 +136,7 @@ describe("seed helpers", () => {
   });
 
   it("keeps companies apart", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const a = await harness.seedCompany({ agents: ["A1"] });
     const b = await harness.seedCompany({ agents: ["B1", "B2"] });
     expect(a.id).not.toBe(b.id);
@@ -198,7 +198,7 @@ describe("request()", () => {
   let ctxRef: () => PluginContext;
 
   async function start(options: { manifest?: PaperclipPluginManifestV1; calls?: PluginApiRequestInput[] } = {}) {
-    harness = await createBoardroomHarness({
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true,
       migrationsDir: FIXTURE_MIGRATIONS,
       manifest: options.manifest ?? withRoutes,
       plugin: routedPlugin(options.calls),
@@ -209,7 +209,7 @@ describe("request()", () => {
 
   it("answers 404 when the manifest declares no apiRoutes, without calling the worker", async () => {
     const calls: PluginApiRequestInput[] = [];
-    harness = await createBoardroomHarness({
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true,
       migrationsDir: FIXTURE_MIGRATIONS,
       manifest: { ...defaultManifest, apiRoutes: undefined },
       plugin: routedPlugin(calls),
@@ -428,7 +428,7 @@ describe("request()", () => {
     });
 
     it("answers 501 when the plugin has no onApiRequest handler", async () => {
-      harness = await createBoardroomHarness({
+      harness = await createBoardroomHarness({ everyCompanyConfigured: true,
         migrationsDir: FIXTURE_MIGRATIONS,
         manifest: withRoutes,
         plugin: definePlugin({ async setup() {} }),
@@ -452,7 +452,7 @@ describe("parameter binding", () => {
   });
 
   it("lets IN $1 with an array work and makes = ANY($1) with an array fail", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const company = await harness.seedCompany();
     for (const body of ["one", "two", "three"]) {
       await harness.ctx.db.execute(`INSERT INTO ${NOTES_TABLE} (company_id, body) VALUES ($1, $2)`, [company.id, body]);
@@ -481,7 +481,7 @@ describe("live-update spy", () => {
         });
       },
     });
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, plugin });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS, plugin });
     const company = await harness.seedCompany();
     await harness.sdk.getData("touch", { companyId: company.id });
 
@@ -513,7 +513,7 @@ describe("agent sessions", () => {
   }
 
   it("records sends, creates a queued run and delivers simulated events", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
     const company = await harness.seedCompany({ agents: ["CEO"] });
     const agentId = company.agents[0]!.id;
 
@@ -545,7 +545,7 @@ describe("agent sessions", () => {
   });
 
   it("can make the next send fail, as the host does when a wake is refused", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
     const company = await harness.seedCompany({ agents: ["CEO"] });
 
     harness.failNextSend(new Error("Agent is paused"));
@@ -561,7 +561,7 @@ describe("agent sessions", () => {
   });
 
   it("can fail every send that matches a predicate", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
     const company = await harness.seedCompany({ agents: ["CEO", "CTO"] });
     const [ceo, cto] = company.agents;
     harness.failSends((send) => send.agentId === cto!.id, () => new Error("Budget exceeded"));
@@ -572,7 +572,7 @@ describe("agent sessions", () => {
   });
 
   it("refuses a session for an agent of another company", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS, plugin: sessionPlugin() });
     const a = await harness.seedCompany({ agents: ["A1"] });
     const b = await harness.seedCompany({ agents: ["B1"] });
     await expect(
@@ -595,7 +595,7 @@ describe("restart()", () => {
         ctx.data.register("memory", async () => memory);
       },
     });
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, plugin });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS, plugin });
     const company = await harness.seedCompany({ agents: ["CEO"] });
     await harness.ctx.db.execute(`INSERT INTO ${NOTES_TABLE} (company_id, body) VALUES ($1, 'kept')`, [company.id]);
     await harness.sdk.performAction("remember", { value: "lost" });
@@ -627,7 +627,7 @@ describe("restart()", () => {
   });
 
   it("reloads the worker module so module-level memory is dropped too", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const before = harness.plugin;
     await harness.restart();
     expect(harness.plugin).not.toBe(before);
@@ -646,7 +646,7 @@ describe("restart()", () => {
         "issue.comments.create",
       ],
     };
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, manifest });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS, manifest });
     const company = await harness.seedCompany({ agents: ["CEO"] });
     const scope = { scopeKind: "company", scopeId: company.id, stateKey: "last-room" } as const;
     const issue = await harness.ctx.issues.create({ companyId: company.id, title: "Decision" });
@@ -683,7 +683,7 @@ describe("restart()", () => {
   });
 
   it("refuses state and documents without the capability, as the host does", async () => {
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    harness = await createBoardroomHarness({ everyCompanyConfigured: true, migrationsDir: FIXTURE_MIGRATIONS });
     const scope = { scopeKind: "instance", stateKey: "k" } as const;
     await expect(harness.ctx.state.get(scope)).rejects.toThrow(/missing required capability "plugin.state.read"/);
     await expect(harness.ctx.state.set(scope, 1)).rejects.toThrow(/missing required capability "plugin.state.write"/);

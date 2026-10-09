@@ -12,6 +12,9 @@
  *   `apiRoutes` matching, route auth, company resolution, company access, then the worker.
  * - `host/sessions.ts`: `ctx.agents.sessions` records sends, creates a queued automation run per
  *   send, and can be told to fail sends.
+ * - `host/invocation.ts`: the host's invocation-scope rule. A worker call that names a company is refused
+ *   outside an invocation (a session event callback, a job) unless the company has a plugin
+ *   configuration row (`saveCompanyConfig`). API requests and `sdk.emit` events are invocations.
  * - `host/streams.ts`: `streamEvents` records `ctx.streams.emit` calls (live updates).
  * - `host/records.ts`: host records that survive `restart()`: companies, agents, members,
  *   issues, issue comments, issue documents and `ctx.state`.
@@ -33,6 +36,7 @@ import defaultManifest from "../../src/manifest.js";
 import { derivePluginDatabaseNamespace } from "./host-sql-rules.js";
 import { createDatabase, createDbClient } from "./host/db.js";
 import { viaJson } from "./host/errors.js";
+import { InvocationGate, runInInvocation } from "./host/invocation.js";
 import { HostRecords } from "./host/records.js";
 import { dispatchApiRequest, type HarnessResponse, type RequestOptions } from "./host/routing.js";
 import { Seeder, type SeedCostEventInput, type SeededCompany, type SeedRunInput } from "./host/seeding.js";
@@ -60,6 +64,12 @@ export const BOARDROOM_NAMESPACE = derivePluginDatabaseNamespace(
 );
 
 export interface CreateHarnessOptions {
+  /**
+   * Treat every company as having a plugin configuration row, so the host also admits its calls made
+   * outside an invocation. Default `false`: a company has no row (Boardroom has no settings), which is
+   * the real default. Only tests that are not about the invocation-scope rule should set this.
+   */
+  everyCompanyConfigured?: boolean;
   /** Plugin under test. Defaults to `src/worker.ts`, re-imported on every start so module state resets. */
   plugin?: PaperclipPlugin;
   /** Manifest under test. Defaults to `src/manifest.ts`. */
@@ -104,6 +114,11 @@ export interface BoardroomHarness {
   /** Make every `sendMessage` call that matches `predicate` throw, until `clearSendFailures()`. */
   failSends(predicate: (send: SessionSendRecord) => boolean, makeError?: (send: SessionSendRecord) => Error): void;
   clearSendFailures(): void;
+  /**
+   * Save a plugin configuration row for the company (`POST /api/plugins/:id/config`). The host then also
+   * admits that company's calls made outside an invocation. Boardroom must not depend on it.
+   */
+  saveCompanyConfig(companyId: string): void;
   /** Simulate a worker restart on the same database. */
   restart(): Promise<void>;
   close(): Promise<void>;
@@ -138,6 +153,8 @@ export async function createBoardroomHarness(options: CreateHarnessOptions = {})
   let sdk!: TestHarness;
   let plugin!: PaperclipPlugin;
 
+  const gate = new InvocationGate(manifest);
+  gate.everyCompanyConfigured = options.everyCompanyConfigured ?? false;
   const seeder = new Seeder(pg, records, () => sdk);
 
   async function start(): Promise<void> {
@@ -147,6 +164,12 @@ export async function createBoardroomHarness(options: CreateHarnessOptions = {})
     installStreams(next.ctx, streamEvents);
     sessions.install(next.ctx);
     records.install(next.ctx);
+    gate.install(next.ctx);
+    const emitEvent = next.emit.bind(next);
+    next.emit = (eventType, payload, base) => runInInvocation(base?.companyId, () => emitEvent(eventType, payload, base));
+    const performAction = next.performAction.bind(next);
+    next.performAction = (key, params, options) =>
+      runInInvocation((params as { companyId?: string } | undefined)?.companyId, () => performAction(key, params, options));
     const nextPlugin = options.plugin ?? (await loadWorkerFresh());
     sdk = next;
     plugin = nextPlugin;
@@ -185,6 +208,9 @@ export async function createBoardroomHarness(options: CreateHarnessOptions = {})
 
     request: (method, requestPath, requestOptions) =>
       dispatchApiRequest({ manifest, plugin, records }, method, requestPath, requestOptions),
+    saveCompanyConfig: (companyId) => {
+      gate.configured.add(companyId);
+    },
     simulateSessionEvent: (sessionId, event) => sessions.simulateEvent(sessionId, event),
     failNextSend: (error = new Error("Session send failed")) => sessions.failNext(error),
     failSends: (predicate, makeError = () => new Error("Session send failed")) => sessions.failWhen(predicate, makeError),
