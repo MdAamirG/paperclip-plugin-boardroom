@@ -1,6 +1,14 @@
 import { createContext, createElement, useContext, useMemo, type ReactNode } from "react";
 import { BOARDROOM_PLUGIN_ID } from "../constants.js";
-import type { CreateRoomRequest, RoomDetail, RoomListResponse } from "../api/types.js";
+import type {
+  CreateRoomRequest,
+  CreateWorkRequest,
+  CreateWorkResponse,
+  RemoveWorkLinkResponse,
+  RoomDetail,
+  RoomListResponse,
+  WorkLinkView,
+} from "../api/types.js";
 
 /**
  * Client for the plugin's scoped JSON routes (`/api/plugins/:pluginId/api/*`).
@@ -118,9 +126,9 @@ export interface BoardroomClient {
   stopRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   closeRoom<T = unknown>(roomId: string): Promise<T>;
   updateDecision<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
-  createWork<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
-  addWorkLink<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
-  removeWorkLink<T = unknown>(roomId: string, issueId: string): Promise<T>;
+  createWork(roomId: string, body: Omit<CreateWorkRequest, "companyId">): Promise<CreateWorkResponse>;
+  addWorkLink(roomId: string, body: { issueId: string }): Promise<WorkLinkView>;
+  removeWorkLink(roomId: string, issueId: string): Promise<RemoveWorkLinkResponse>;
   listRoomsForIssue<T = unknown>(issueId: string): Promise<T>;
 }
 

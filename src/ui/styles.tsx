@@ -65,6 +65,10 @@ textarea.br-input { resize: vertical; min-height: ${SPACE(24)}; }
 .br-nav:hover { background: color-mix(in oklab, var(--accent) 50%, transparent); color: var(--foreground); }
 .br-nav[aria-current="page"] { background: var(--accent); color: var(--foreground); }
 .br-icon { flex-shrink: 0; width: ${SPACE(4)}; height: ${SPACE(4)}; }
+.br-work-list { display: flex; flex-direction: column; }
+.br-work-row { display: flex; flex-direction: column; gap: ${SPACE(1.5)}; padding: ${SPACE(2)} 0; border-bottom: thin solid var(--border); }
+.br-work-row:last-child { border-bottom: 0; }
+.br-work-link { color: var(--foreground); font-weight: 500; overflow-wrap: anywhere; }
 .br-visually-hidden { position: absolute; width: ${SPACE(0.25)}; height: ${SPACE(0.25)}; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 `;
 
