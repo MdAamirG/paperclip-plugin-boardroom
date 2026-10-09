@@ -2,6 +2,7 @@ import { useHostLocation, useHostNavigation, type PluginPageProps, type PluginSi
 import { BOARDROOM_ROUTE_PATH } from "../constants.js";
 import { CreateRoomPage } from "./components/CreateRoom.js";
 import { RoomDetailPage } from "./components/RoomDetail.js";
+import { FromRoomChip } from "./regions/from-room-chip.js";
 import { RoomListPage } from "./components/RoomList.js";
 import { boardroomPaths, parseBoardroomRoute } from "./route.js";
 import { BoardroomStyles } from "./styles.js";
@@ -67,3 +68,5 @@ export function BoardroomSidebarLink(_props: PluginSidebarProps) {
     </>
   );
 }
+
+export { FromRoomChip };
