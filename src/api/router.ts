@@ -5,6 +5,7 @@ import { ApiError, badRequest } from "./errors.js";
 import { isUuid } from "./validation.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
+import { addWorkLink, createWork, removeWorkLink } from "./work.js";
 
 /**
  * Route key to handler. A route with no entry answers 501 `not_implemented`; the ticket that owns
@@ -14,6 +15,9 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "rooms.list": listRooms,
   "rooms.create": createRoom,
   "rooms.get": getRoomDetail,
+  "work.create": createWork,
+  "work-links.add": addWorkLink,
+  "work-links.remove": removeWorkLink,
 };
 
 const KNOWN_ROUTE_KEYS: ReadonlySet<string> = new Set(ROUTE_SPECS.map((spec) => spec.routeKey));

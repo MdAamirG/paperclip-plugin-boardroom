@@ -11,7 +11,6 @@ import {
   insertWorkLink,
   listActiveParticipants,
   listRoomSummaries,
-  listWorkLinks,
   type Room,
 } from "../db/index.js";
 import { canControl, canPost, requireLevel, type Actor } from "./access.js";
@@ -21,6 +20,7 @@ import { ApiError, badRequest, ok, roomNotFound, unprocessable } from "./errors.
 import { announceRoomChanged } from "./live.js";
 import type { ParticipantView, RoomDetail, RoomListResponse } from "./types.js";
 import { isUuid, optionalId, readBody, requiredString } from "./validation.js";
+import { listWorkLinkViews } from "./work-view.js";
 
 const TITLE_MAX = 200;
 const TOPIC_MAX = 10_000;
@@ -43,7 +43,7 @@ export async function buildRoomDetail(ctx: PluginContext, actor: Actor, room: Ro
   const [participants, activeRound, workLinks] = await Promise.all([
     listActiveParticipants(db, room.companyId, room.id),
     getActiveRound(db, room.companyId, room.id),
-    listWorkLinks(db, room.companyId, room.id),
+    listWorkLinkViews(ctx, room.companyId, room.id),
   ]);
   // Fetch the names in parallel. The Room is already committed by now (create calls this after the
   // writes), so a failed lookup must not turn into a 500: that Participant just has no name.

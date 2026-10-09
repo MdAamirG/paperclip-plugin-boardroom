@@ -699,7 +699,7 @@ describe("GET /rooms/:roomId", () => {
 
 describe("agent actors and not-yet-built routes", () => {
   type Spec = (typeof ROUTE_SPECS)[number];
-  const BUILT = new Set(["rooms.list", "rooms.create", "rooms.get"]);
+  const BUILT = new Set(["rooms.list", "rooms.create", "rooms.get", "work.create", "work-links.add", "work-links.remove"]);
 
   async function requestFor(h: BoardroomHarness, spec: Spec, company: SeededCompany, issueId: string, actor?: Parameters<BoardroomHarness["request"]>[2] extends infer O ? (O extends { actor?: infer A } ? A : never) : never) {
     const path = spec.path

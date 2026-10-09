@@ -66,3 +66,33 @@ export function listWorkLinksForIssue(db: Db, companyId: string, issueId: string
     mapWorkLink,
   );
 }
+
+/** One work link of a Room by issue id, or `null`. */
+export function getWorkLink(db: Db, companyId: string, roomId: string, issueId: string): Promise<WorkLink | null> {
+  return selectOne(
+    db,
+    `SELECT * FROM ${table(db, "work_links")} WHERE company_id = $1 AND room_id = $2 AND issue_id = $3`,
+    [companyId, roomId, issueId],
+    mapWorkLink,
+  );
+}
+
+/** Delete the link between a Room and an issue (either relation). Returns false when there was none. */
+export async function deleteWorkLink(db: Db, companyId: string, roomId: string, issueId: string): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `DELETE FROM ${table(db, "work_links")} WHERE company_id = $1 AND room_id = $2 AND issue_id = $3`,
+    [companyId, roomId, issueId],
+  );
+  return rowCount > 0;
+}
+
+/**
+ * `rooms.updated_at` is never bumped by the database, so a mutation that should move the Room up the
+ * list sets it itself. Follow-up work changes call this.
+ */
+export async function bumpRoomUpdatedAt(db: Db, companyId: string, roomId: string): Promise<void> {
+  await db.execute(`UPDATE ${table(db, "rooms")} SET updated_at = now() WHERE company_id = $1 AND id = $2`, [
+    companyId,
+    roomId,
+  ]);
+}
