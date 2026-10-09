@@ -6,7 +6,7 @@
  * Types still come from the real SDK. When `src/ui` starts importing another hook or component,
  * add a stand-in here.
  */
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import type {
   HostLocation,
   HostNavigation,
@@ -15,6 +15,10 @@ import type {
   PluginHostContext,
   PluginStreamResult,
   PluginToastInput,
+  ProjectPickerProps,
+  SpinnerProps,
+  StatusBadgeProps,
+  MarkdownBlockProps,
 } from "@paperclipai/plugin-sdk/ui";
 
 export type * from "@paperclipai/plugin-sdk/ui";
@@ -39,8 +43,11 @@ function createStore() {
     data: new Map<string, Partial<PluginDataResult<unknown>>>(),
     actions: new Map<string, PluginActionFn>(),
     streams: new Map<string, unknown[]>(),
+    /** The options of the latest `usePluginStream(channel, options)` call, per channel. */
+    streamOptions: new Map<string, { companyId?: string } | undefined>(),
     toasts: [] as PluginToastInput[],
     navigations: [] as string[],
+    projects: [] as { id: string; name: string }[],
   };
 
   function changed() {
@@ -62,12 +69,18 @@ function createStore() {
       state.data.clear();
       state.actions.clear();
       state.streams.clear();
+      state.streamOptions.clear();
       state.toasts.length = 0;
       state.navigations.length = 0;
+      state.projects = [];
       changed();
     },
     setHostContext(patch: Partial<PluginHostContext>) {
       state.hostContext = { ...state.hostContext, ...patch };
+      changed();
+    },
+    setLocation(pathname: string, search = "") {
+      state.location = { pathname, search, hash: "" };
       changed();
     },
     setData<T>(key: string, result: Partial<PluginDataResult<T>>) {
@@ -115,7 +128,11 @@ export function useHostLocation(): HostLocation {
 export function useHostNavigation(): HostNavigation {
   useStoreVersion();
   const navigate = (to: string) => {
-    sdkUi.state.navigations.push(resolveHref(to));
+    const href = resolveHref(to);
+    sdkUi.state.navigations.push(href);
+    // Like the host router: the location follows the navigation.
+    const [path = href, search = ""] = href.split("?");
+    sdkUi.setLocation(path, search ? `?${search}` : "");
   };
   return {
     resolveHref,
@@ -149,8 +166,9 @@ export function usePluginAction(key: string): PluginActionFn {
   };
 }
 
-export function usePluginStream<T = unknown>(channel: string): PluginStreamResult<T> {
+export function usePluginStream<T = unknown>(channel: string, options?: { companyId?: string }): PluginStreamResult<T> {
   useStoreVersion();
+  sdkUi.state.streamOptions.set(channel, options);
   const events = (sdkUi.state.streams.get(channel) ?? []) as T[];
   return {
     events,
@@ -167,4 +185,33 @@ export function usePluginToast() {
     sdkUi.state.toasts.push(input);
     return null;
   };
+}
+
+// Stand-ins for the host-provided shared components. They render plain, queryable markup.
+
+export function StatusBadge({ label, status }: StatusBadgeProps) {
+  return <span data-testid="status-badge" data-status={status}>{label}</span>;
+}
+
+export function Spinner({ label }: SpinnerProps) {
+  return <span role="status" aria-label={label ?? "Loading"} data-testid="spinner" />;
+}
+
+export function MarkdownBlock({ content }: MarkdownBlockProps): ReactNode {
+  return <div data-testid="markdown-block">{content}</div>;
+}
+
+/** A native select over `sdkUi.state.projects`, so tests can pick a project by name. */
+export function ProjectPicker({ value, onChange, placeholder, noneLabel }: ProjectPickerProps) {
+  useStoreVersion();
+  return (
+    <select aria-label={placeholder ?? "Project"} value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">{noneLabel ?? "No project"}</option>
+      {sdkUi.state.projects.map((project) => (
+        <option key={project.id} value={project.id}>
+          {project.name}
+        </option>
+      ))}
+    </select>
+  );
 }
