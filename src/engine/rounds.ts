@@ -21,6 +21,7 @@ import {
   setTurnMessage,
   setTurnRunId,
   setTurnSession,
+  skipRunningTurn,
   startNextTurn,
   type Room,
   type Round,
@@ -151,10 +152,34 @@ async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promi
     return true;
   } catch (error) {
     ctx.logger.warn("Boardroom could not run a Turn", { turnId: turn.id, error: errorMessage(error) });
-    // Ticket 07 turns a rejected send into a skipped Turn; until then it is a failed one.
-    await settleTurn(ctx, companyId, turn.id, { outcome: "failed", hostMessage: errorMessage(error) }, { advance: false });
+    // A rejected send (budget, paused agent, not invokable) is a skipped Turn with the host's own words.
+    await skipTurn(ctx, companyId, turn.id, errorMessage(error));
     return false;
   }
+}
+
+/** Skip a running Turn whose session or send the host rejected: no run started, so it is not counted. */
+async function skipTurn(ctx: PluginContext, companyId: string, turnId: string, hostMessage: string): Promise<void> {
+  if (!(await skipRunningTurn(ctx.db, companyId, turnId, { reason: "not_invokable", hostMessage }))) return;
+  const turn = await getTurn(ctx.db, companyId, turnId);
+  if (!turn) return;
+  const round = await getRound(ctx.db, companyId, turn.roundId);
+  if (!round) return;
+  await audit(ctx, {
+    companyId,
+    actingUserId: null,
+    roomId: round.roomId,
+    message: "Turn skipped",
+    metadata: { roundId: round.id, turnId, agentId: turn.agentId, outcome: "skipped", skipReason: "not_invokable", hostMessage },
+  });
+  if (turn.sessionId) {
+    try {
+      await ctx.agents.sessions.close(turn.sessionId, companyId);
+    } catch (error) {
+      ctx.logger.warn("Boardroom could not close a session", { turnId, sessionId: turn.sessionId, error: errorMessage(error) });
+    }
+  }
+  announceRoomChanged(ctx, companyId, round.roomId);
 }
 
 async function agentLabel(ctx: PluginContext, companyId: string, agentId: string): Promise<{ name: string; role: string | null }> {

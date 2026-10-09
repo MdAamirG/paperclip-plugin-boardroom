@@ -211,3 +211,22 @@ export async function markPostedTurnFailed(db: Db, companyId: string, turnId: st
   );
   return rowCount > 0;
 }
+
+/**
+ * A running Turn whose send the host refused becomes `finished`/`skipped` with the host's message
+ * word for word. Settle-once like `finishRunningTurn` (`WHERE status = 'running'`).
+ */
+export async function skipRunningTurn(
+  db: Db,
+  companyId: string,
+  turnId: string,
+  skip: { reason: "not_invokable" | "stopped"; hostMessage?: string | null },
+): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "turns")}
+        SET status = 'finished', outcome = 'skipped', skip_reason = $3, host_message = $4::text, finished_at = now()
+      WHERE company_id = $1 AND id = $2 AND status = 'running'`,
+    [companyId, turnId, skip.reason, skip.hostMessage ?? null],
+  );
+  return rowCount > 0;
+}

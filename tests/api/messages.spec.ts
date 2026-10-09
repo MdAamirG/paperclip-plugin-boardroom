@@ -83,16 +83,6 @@ describe("POST /rooms/:roomId/messages", () => {
     expect(page.body.hasMore).toBe(false);
   });
 
-  it("saves a note and starts no Round for askAll without a valid mention (Ask all comes later)", async () => {
-    const s = await setup();
-    const response = await send(s, { body: "What does everyone think?", askAll: true });
-    expect(response.status).toBe(201);
-    expect(response.body.round).toBeNull();
-    expect(response.body.ignoredMentions).toEqual([]);
-    expect(await listRounds(s.h.ctx.db, s.company.id, s.room.id)).toEqual([]);
-    expect(s.h.sessionSends).toEqual([]);
-  });
-
   it("refuses a viewer with 403 on send and lets them read the transcript", async () => {
     const s = await setup();
     await send(s, { body: "visible to all" });

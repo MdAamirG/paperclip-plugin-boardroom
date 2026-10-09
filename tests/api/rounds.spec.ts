@@ -271,15 +271,15 @@ describe("settling a Turn", () => {
     expect(s.h.sessionSends[0]!.sessionId).not.toBe(s.h.sessionSends[1]!.sessionId);
   });
 
-  it("marks a Turn failed when the host refuses the send, and the Round continues", async () => {
+  it("skips a Turn when the host refuses the send, and the Round continues", async () => {
     const s = await setup();
     const [ceo, cto] = s.company.agents;
     s.h.failNextSend(new Error("Agent is paused"));
     const response = await send(s, { body: "@CEO @CTO go", mentions: [ceo!.id, cto!.id] });
     expect(response.status).toBe(201);
     const turns = await turnsOf(s, response.body.round!.id);
-    expect(turns.map((t) => [t.status, t.outcome])).toEqual([["finished", "failed"], ["running", null]]);
-    expect(turns[0]!.hostMessage).toBe("Agent is paused");
+    expect(turns.map((t) => [t.status, t.outcome])).toEqual([["finished", "skipped"], ["running", null]]);
+    expect(turns[0]).toMatchObject({ skipReason: "not_invokable", hostMessage: "Agent is paused" });
     expect(s.calls.close).toHaveLength(1);
   });
 });
@@ -458,5 +458,118 @@ describe("activity, live updates and Room freshness", () => {
     for (const e of s.h.streamEvents.slice(before)) expect(e.event).toMatchObject({ type: "room.changed", roomId: s.room.id });
     const updatedAfter = (await s.h.sql<{ updated_at: string }>("SELECT updated_at FROM plugin_boardroom_79f8e138fc.rooms"))[0]!.updated_at;
     expect(new Date(updatedAfter).getTime()).toBeGreaterThan(new Date(updatedBefore).getTime());
+  });
+});
+
+describe("multi-agent Rounds (ticket 07)", () => {
+  const settled = async (s: Setup, roundId: string) =>
+    vi.waitFor(async () => expect((await roundsOf(s)).find((r) => r.id === roundId)?.status).toBe("completed"));
+  const names = (s: Setup, ids: string[]) => ids.map((id) => s.company.agents.find((a) => a.id === id)!.name);
+
+  it("runs B then A for mentions B, A, B: two Turns, only B's session until B settles", async () => {
+    const s = await setup();
+    const [a, b] = s.company.agents;
+    const response = await send(s, { body: "@CTO @CEO @CTO", mentions: [b!.id, a!.id, b!.id] });
+    expect(response.body.round!.turns.map((t) => t.agentId)).toEqual([b!.id, a!.id]);
+    expect(s.calls.create.map((c) => c.agentId)).toEqual([b!.id]);
+    await reply(s, 0, "B says");
+    await vi.waitFor(() => expect(s.calls.create.map((c) => c.agentId)).toEqual([b!.id, a!.id]));
+    await reply(s, 1, "A says");
+    await settled(s, response.body.round!.id);
+    expect(s.calls.create).toHaveLength(2);
+  });
+
+  it("Ask all runs every active Participant in join order and ignores mentions", async () => {
+    const s = await setup();
+    const [a, b, c] = s.company.agents;
+    const response = await send(s, { body: "@CFO everyone please", mentions: [c!.id], askAll: true });
+    expect(response.status).toBe(201);
+    expect(response.body.round).toMatchObject({ askAll: true });
+    expect(response.body.round!.turns.map((t) => t.agentId)).toEqual([a!.id, b!.id, c!.id]);
+    for (let i = 0; i < 3; i++) {
+      await vi.waitFor(() => expect(s.h.sessionSends).toHaveLength(i + 1));
+      await reply(s, i, `reply ${i}`);
+    }
+    await settled(s, response.body.round!.id);
+    expect(s.calls.create.map((x) => x.agentId)).toEqual([a!.id, b!.id, c!.id]);
+  });
+
+  it("Ask all counts the full set against the cap", async () => {
+    const s = await setup({ maxTotalTurns: 2 });
+    expectError(await send(s, { body: "everyone", askAll: true }), 422, "turn_cap_reached");
+    expect(s.h.sessionSends).toEqual([]);
+  });
+
+  it("refuses Ask all from an operator", async () => {
+    const s = await setup();
+    expectError(await send(s, { body: "everyone", askAll: true }, s.operator), 403, "round_not_allowed");
+  });
+
+  it("puts the first agent's Message in the second agent's prompt", async () => {
+    const s = await setup();
+    const [a, b] = s.company.agents;
+    await send(s, { body: "both", mentions: [a!.id, b!.id] });
+    expect(s.h.sessionSends[0]!.prompt).not.toContain("Margins are fine");
+    await reply(s, 0, "Margins are fine");
+    await vi.waitFor(() => expect(s.h.sessionSends).toHaveLength(2));
+    expect(s.h.sessionSends[1]!.agentId).toBe(b!.id);
+    expect(s.h.sessionSends[1]!.prompt).toContain("Margins are fine");
+  });
+
+  it("moves on after a failed Turn and completes the Round", async () => {
+    const s = await setup();
+    const [a, b] = s.company.agents;
+    const response = await send(s, { body: "both", mentions: [a!.id, b!.id] });
+    const record = s.h.sessionSends[0]!;
+    s.h.simulateSessionEvent(record.sessionId, { runId: record.runId!, seq: 1, eventType: "error", stream: null, message: "boom", payload: null });
+    await vi.waitFor(() => expect(s.h.sessionSends).toHaveLength(2));
+    await reply(s, 1, "fine");
+    await settled(s, response.body.round!.id);
+    expect((await turnsOf(s, response.body.round!.id)).map((t) => t.outcome)).toEqual(["failed", "posted"]);
+  });
+
+  it("skips a rejected send with the host's exact text, advances, and does not count it", async () => {
+    const s = await setup({ maxTotalTurns: 2 });
+    const [a, b] = s.company.agents;
+    s.h.failSends((x) => x.agentId === a!.id, () => new Error("Agent is over budget (limit $5.00)"));
+    const response = await send(s, { body: "both", mentions: [a!.id, b!.id] });
+    const [first, second] = await turnsOf(s, response.body.round!.id);
+    expect(first).toMatchObject({ status: "finished", outcome: "skipped", skipReason: "not_invokable", hostMessage: "Agent is over budget (limit $5.00)" });
+    expect(second!.status).toBe("running");
+    expect(s.calls.close).toHaveLength(1);
+    s.h.clearSendFailures();
+    await reply(s, 1, "ok");
+    await settled(s, response.body.round!.id);
+    const skipped = s.h.activity.filter((e) => e.message === "Turn skipped");
+    expect(skipped).toHaveLength(1);
+    expect(JSON.stringify(skipped[0])).toContain("Agent is over budget (limit $5.00)");
+    // Cap 2: one skipped and one posted; a new Round of one Turn is accepted.
+    expect((await send(s, { body: "@CEO again", mentions: [a!.id] })).status).toBe(201);
+    expect(names(s, [a!.id])).toEqual(["CEO"]);
+  });
+
+  it("never creates a second session for the same (Round, agent)", async () => {
+    const s = await setup();
+    const [a, b] = s.company.agents;
+    const response = await send(s, { body: "both", mentions: [a!.id, b!.id] });
+    await reply(s, 0, "one");
+    await vi.waitFor(() => expect(s.h.sessionSends).toHaveLength(2));
+    await reply(s, 1, "two");
+    await settled(s, response.body.round!.id);
+    await advanceRound(s.h.ctx, s.company.id, response.body.round!.id);
+    expect(s.calls.create.map((c) => c.agentId)).toEqual([a!.id, b!.id]);
+  });
+
+  it("accepts a retry Round to the same agent after a failed Turn", async () => {
+    const s = await setup();
+    const a = s.company.agents[0]!;
+    const first = await send(s, { body: "@CEO", mentions: [a.id] });
+    const record = s.h.sessionSends[0]!;
+    s.h.simulateSessionEvent(record.sessionId, { runId: record.runId!, seq: 1, eventType: "error", stream: null, message: "boom", payload: null });
+    await settled(s, first.body.round!.id);
+    const second = await send(s, { body: "@CEO retry", mentions: [a.id] });
+    expect(second.status).toBe(201);
+    expect(second.body.round!.seq).toBe(2);
+    expect(s.calls.create).toHaveLength(2);
   });
 });

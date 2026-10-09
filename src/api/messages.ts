@@ -9,6 +9,7 @@ import {
   getRound,
   getRoundByTriggerMessage,
   insertMessage,
+  listActiveParticipants,
   listMessagesPage,
   type RoomMessage,
 } from "../db/index.js";
@@ -71,7 +72,7 @@ export const listRoomMessages: RouteHandler = async ({ ctx, input, actor }) => {
 
 interface ValidatedSend {
   body: string;
-  /** Validated; "Ask all" is acted on by the multi-agent ticket. */
+  /** Addresses every active Participant (Owner/admin only, like any Round). */
   askAll: boolean;
   mentions: string[];
   idempotencyKey: string;
@@ -99,7 +100,7 @@ function parseSendBody(raw: Record<string, unknown>): ValidatedSend {
 
 /**
  * `POST /rooms/:roomId/messages`: save a note; valid mentions of active Participants also start a
- * Round (one Turn each, in the order mentioned). "Ask all" is not acted on yet.
+ * Round (one Turn each, in the order mentioned). `askAll` addresses every active Participant in join order.
  *
  * Starting a Round needs `control` (403 `round_not_allowed`), no active Round (409 `round_active`)
  * and room under the turn cap (422 `turn_cap_reached`); these are checked before anything is
@@ -134,7 +135,12 @@ export const sendMessage: RouteHandler = async ({ ctx, input, actor }) => {
 
   if (room.status === "closed") throw conflict("room_closed", "This Room is closed, so it no longer accepts messages");
 
-  const { valid, ignored } = await resolveMentions(ctx, { companyId, roomId: room.id, body: send.body, mentions: send.mentions });
+  const resolved = await resolveMentions(ctx, { companyId, roomId: room.id, body: send.body, mentions: send.mentions });
+  const { ignored } = resolved;
+  // "Ask all" addresses every active Participant in join order and overrides mentions for ordering.
+  const valid = send.askAll
+    ? (await listActiveParticipants(ctx.db, companyId, room.id)).map((p) => p.agentId)
+    : resolved.valid;
 
   if (valid.length > 0) {
     if (!(canPost(actor) && canControl(actor, room))) {
