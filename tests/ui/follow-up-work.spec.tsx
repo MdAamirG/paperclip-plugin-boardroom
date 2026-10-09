@@ -304,9 +304,19 @@ describe("link and unlink", () => {
     expect(api.calls).toEqual([{ method: "DELETE", path: `${LINKS}/issue-1`, query: { companyId: COMPANY_ID }, body: undefined }]);
   });
 
-  it("shows an unlink failure on its own row and keeps the row", async () => {
+  it("reloads the Room when the link is already gone (404), so the stale row disappears", async () => {
     const api = createMockApi().on("DELETE", `${LINKS}/issue-1`, () => {
       throw new BoardroomApiError(404, { error: "work_link_not_found", message: "That task is not linked to this Room" });
+    });
+    const view = renderRegion(detailFixture({ workLinks: [linkView()] }), api);
+    fireEvent.click(screen.getByRole("button", { name: "Unlink PAP-1 Raise prices" }));
+    await waitFor(() => expect(view.reloadRoom).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows an unlink failure on its own row and keeps the row", async () => {
+    const api = createMockApi().on("DELETE", `${LINKS}/issue-1`, () => {
+      throw new BoardroomApiError(500, { error: "internal_error", message: "That task is not linked to this Room" });
     });
     const view = renderRegion(detailFixture({ workLinks: [linkView(), linkView({ id: "link-2", issueId: "issue-2", issue: issueView({ id: "issue-2", identifier: "PAP-2", title: "Other" }) })] }), api);
     fireEvent.click(screen.getByRole("button", { name: "Unlink PAP-1 Raise prices" }));

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { StatusBadge, useHostContext, useHostNavigation } from "@paperclipai/plugin-sdk/ui";
 import type { StatusBadgeVariant } from "@paperclipai/plugin-sdk/ui";
 import type { WorkLinkView } from "../../api/types.js";
-import { useBoardroomClient } from "../api.js";
+import { BoardroomApiError, useBoardroomClient } from "../api.js";
 import { CreateWorkForm } from "../components/CreateWorkForm.js";
 import { ErrorNotice } from "../components/ErrorNotice.js";
 import { LinkWorkForm } from "../components/LinkWorkForm.js";
@@ -52,7 +52,12 @@ function FollowUpWorkPanel({ companyId, detail, reloadRoom }: RegionProps) {
       await client.removeWorkLink(room.id, link.issueId);
       reloadRoom();
     } catch (failure) {
-      setRowErrors((current) => ({ ...current, [link.issueId]: toError(failure) }));
+      if (failure instanceof BoardroomApiError && failure.status === 404) {
+        // The link is already gone (removed elsewhere): reload so the stale row disappears.
+        reloadRoom();
+      } else {
+        setRowErrors((current) => ({ ...current, [link.issueId]: toError(failure) }));
+      }
     } finally {
       setUnlinking(null);
     }
