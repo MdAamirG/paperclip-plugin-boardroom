@@ -180,6 +180,20 @@ describe("create follow-up work", () => {
     expect(h.activity.filter((e) => e.message.startsWith("Work"))).toEqual([]);
   });
 
+  it("accepts an active member as user assignee and refuses a stranger or non-member", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const stranger = await h.seedCompany();
+    const room = await openRoom(h, company);
+    const memberId = company.members.operator.userId;
+    expectError(await createWork(h, company, room.id, { title: "A", assigneeUserId: stranger.members.operator.userId }), 422, "user_not_in_company");
+    expectError(await createWork(h, company, room.id, { title: "A", assigneeUserId: "nobody" }), 422, "user_not_in_company");
+    expect(await h.ctx.issues.list({ companyId: company.id })).toEqual([]);
+    expect((await createWork(h, company, room.id, { title: "A", assigneeUserId: memberId })).status).toBe(201);
+    const [issue] = await h.ctx.issues.list({ companyId: company.id });
+    expect(issue!.assigneeUserId).toBe(memberId);
+  });
+
   it("validates the body", async () => {
     const h = await start();
     const company = await h.seedCompany();

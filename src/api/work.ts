@@ -106,6 +106,16 @@ export const createWork: RouteHandler = async ({ ctx, input, actor }) => {
     }
   }
 
+  if (v.assigneeUserId !== undefined) {
+    const members = await ctx.access.members.list({ companyId });
+    const isMember = members.some(
+      (m) => m.companyId === companyId && m.principalType === "user" && m.principalId === v.assigneeUserId && m.status === "active",
+    );
+    if (!isMember) {
+      throw unprocessable("user_not_in_company", "The assignee is not an active member of this company", { userId: v.assigneeUserId });
+    }
+  }
+
   // Ordinary issue creation: the plugin origin is the back-link to the Room, and the acting user is
   // the creator and responsible user (the host sets both from `actor.actorUserId`).
   let issue;
