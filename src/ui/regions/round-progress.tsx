@@ -2,8 +2,9 @@ import { useState } from "react";
 import type { RoundView } from "../../api/types.js";
 import { cancelHostRun, useBoardroomApi, useBoardroomClient } from "../api.js";
 import { ErrorNotice } from "../components/ErrorNotice.js";
+import { TurnCost } from "../components/TurnCost.js";
 import { useAsyncResource, toError } from "../hooks.js";
-import { turnAgentLabel, turnStatusText } from "../rounds.js";
+import { turnAgentLabel, turnSkipText, turnStatusText } from "../rounds.js";
 import { Placeholder, RegionFrame, type RegionProps } from "./frame.js";
 
 type Control = "pause" | "resume" | "stop";
@@ -169,6 +170,11 @@ function TurnList({ round, controls, note }: { round: RoundView; controls?: Reac
             <span className="br-turn-agent">{turnAgentLabel(turn)}</span>{" "}
             <span className="br-muted">{turnStatusText(turn)}</span>
             {turn.hostMessage ? <> <span className="br-muted br-small">{turn.hostMessage}</span></> : null}
+            {turn.outcome === "skipped" ? (
+              <> <span className="br-muted br-small" data-skip-reason>{turnSkipText(turn)}</span></>
+            ) : turn.status === "finished" || turn.cost.events > 0 ? (
+              <> <TurnCost cost={turn.cost} /></>
+            ) : null}
           </li>
         ))}
       </ol>

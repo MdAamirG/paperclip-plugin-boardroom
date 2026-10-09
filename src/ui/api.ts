@@ -10,6 +10,7 @@ import type {
   RoomDetail,
   RoomListResponse,
   RoundControlResponse,
+  RoomCostsResponse,
   RoundListResponse,
   SendMessageRequest,
   SendMessageResponse,
@@ -134,7 +135,8 @@ export interface BoardroomClient {
   sendMessage(roomId: string, input: Omit<SendMessageRequest, "companyId">): Promise<SendMessageResponse>;
   /** The Room's Rounds, newest first, each with its Turns. */
   listRounds(roomId: string): Promise<RoundListResponse>;
-  getCosts<T = unknown>(roomId: string): Promise<T>;
+  /** Lifetime cost, per-agent split and Turns used against the cap. */
+  getCosts(roomId: string): Promise<RoomCostsResponse>;
   pauseRound(roomId: string, roundId: string): Promise<RoundControlResponse>;
   resumeRound(roomId: string, roundId: string): Promise<RoundControlResponse>;
   /** Stop the Round; `cancel: "fallback"` means the page must cancel `fallbackRunId` (see `cancelHostRun`). */

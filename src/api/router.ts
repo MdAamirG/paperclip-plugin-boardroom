@@ -3,6 +3,7 @@ import { resolveActor } from "./access.js";
 import type { RouteHandler } from "./context.js";
 import { ApiError, badRequest } from "./errors.js";
 import { isUuid } from "./validation.js";
+import { getRoomCosts } from "./costs.js";
 import { listRoomMessages, sendMessage } from "./messages.js";
 import { updateDecision } from "./decision.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
@@ -31,6 +32,7 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "rounds.pause": pauseRoundRoute,
   "rounds.resume": resumeRoundRoute,
   "rounds.stop": stopRoundRoute,
+  "costs.get": getRoomCosts,
   "decision.update": updateDecision,
   "work.create": createWork,
   "work-links.add": addWorkLink,

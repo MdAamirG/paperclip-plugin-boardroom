@@ -13,6 +13,7 @@ function renderRoom(api: MockBoardroomApi, roomId = "room-1") {
   for (const id of ["room-1", "room-2"]) {
     api.on("GET", `/rooms/${id}/messages`, { messages: [], hasMore: false });
     api.on("GET", `/rooms/${id}/rounds`, { rounds: [] });
+    api.on("GET", `/rooms/${id}/costs`, { roomId: id, costCents: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, runCount: 0, subscriptionBilled: false, turnsUsed: 0, maxTotalTurns: 40, agents: [] });
   }
   // The Participant panel (with control) loads the company's agents for its picker.
   api.on("GET", "host:/companies/company-1/agents", []);

@@ -86,6 +86,7 @@ export function turnFixture(overrides: Partial<TurnView> = {}): TurnView {
     messageId: null,
     startedAt: null,
     finishedAt: null,
+    cost: { costCents: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, events: 0, subscriptionBilled: false },
     ...overrides,
   };
 }

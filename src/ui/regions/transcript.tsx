@@ -5,7 +5,8 @@ import { useBoardroomClient, type BoardroomClient } from "../api.js";
 import { ErrorNotice } from "../components/ErrorNotice.js";
 import { formatTimestamp, shortId } from "../format.js";
 import { toError, useAsyncResource } from "../hooks.js";
-import { turnAgentLabel } from "../rounds.js";
+import { TurnCost } from "../components/TurnCost.js";
+import { turnAgentLabel, turnSkipText } from "../rounds.js";
 import { RegionFrame, type RegionProps } from "./frame.js";
 import { onMessagePosted } from "./message-bus.js";
 
@@ -213,7 +214,7 @@ function authorLabel(message: MessageView, currentUserId: string | null | undefi
   return message.authorId === "local-board" ? "Board" : `Board user ${shortId(message.authorId)}`;
 }
 
-function MessageArticle({ message, userId, activeAgentIds }: { message: MessageView; userId: string | null | undefined; activeAgentIds: ReadonlySet<string> }) {
+function MessageArticle({ message, userId, activeAgentIds, turn }: { message: MessageView; userId: string | null | undefined; activeAgentIds: ReadonlySet<string>; turn?: TurnView }) {
   return (
     <article className="br-message" data-message-id={message.id} data-author-kind={message.authorKind}>
       <header className="br-message-head">
@@ -226,6 +227,7 @@ function MessageArticle({ message, userId, activeAgentIds }: { message: MessageV
         <time className="br-muted br-small" dateTime={message.createdAt}>
           {formatTimestamp(message.createdAt)}
         </time>
+        {turn ? <TurnCost cost={turn.cost} /> : null}
       </header>
       <MarkdownBlock content={message.body} />
     </article>
@@ -242,6 +244,7 @@ export function TranscriptRegion({ companyId, detail, refreshKey }: RegionProps)
     () => interleave(transcript.messages, turnMarkers(rounds.data?.rounds ?? [], transcript.messages, transcript.hasEarlier)),
     [transcript.messages, transcript.hasEarlier, rounds.data],
   );
+  const turnsById = useMemo(() => new Map((rounds.data?.rounds ?? []).flatMap((round) => round.turns).map((turn) => [turn.id, turn] as const)), [rounds.data]);
   const activeAgentIds = useMemo(() => new Set(detail.participants.map((p) => p.agentId.toLowerCase())), [detail.participants]);
 
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -324,9 +327,14 @@ export function TranscriptRegion({ companyId, detail, refreshKey }: RegionProps)
                     {(item.marker.turn.outcome === "failed" || item.marker.turn.outcome === "skipped") && item.marker.turn.hostMessage ? (
                       <span className="br-small">{item.marker.turn.hostMessage}</span>
                     ) : null}
+                    {item.marker.turn.outcome === "skipped" ? (
+                      <span className="br-small" data-skip-reason>{turnSkipText(item.marker.turn)}</span>
+                    ) : (
+                      <TurnCost cost={item.marker.turn.cost} />
+                    )}
                   </p>
                 ) : (
-                  <MessageArticle key={item.message.id} message={item.message} userId={userId} activeAgentIds={activeAgentIds} />
+                  <MessageArticle key={item.message.id} message={item.message} userId={userId} activeAgentIds={activeAgentIds} turn={item.message.turnId ? turnsById.get(item.message.turnId) : undefined} />
                 ),
               )
             )}

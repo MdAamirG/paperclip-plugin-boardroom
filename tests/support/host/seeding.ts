@@ -54,7 +54,10 @@ export interface SeedCostEventInput {
   provider?: string;
   model?: string;
   inputTokens?: number;
+  cachedInputTokens?: number;
   outputTokens?: number;
+  /** Host `billing_type`, for example `subscription_included`; defaults to `unknown`. */
+  billingType?: string;
   occurredAt?: string;
 }
 
@@ -161,8 +164,8 @@ export class Seeder {
     const id = randomUUID();
     await this.pg.query(
       `INSERT INTO public.cost_events
-         (id, company_id, agent_id, heartbeat_run_id, provider, model, input_tokens, output_tokens, cost_cents, occurred_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+         (id, company_id, agent_id, heartbeat_run_id, provider, model, input_tokens, output_tokens, cost_cents, occurred_at, cached_input_tokens, billing_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         id,
         input.companyId,
@@ -174,6 +177,8 @@ export class Seeder {
         input.outputTokens ?? 0,
         input.costCents,
         input.occurredAt ?? new Date().toISOString(),
+        input.cachedInputTokens ?? 0,
+        input.billingType ?? "unknown",
       ],
     );
     return { id };
