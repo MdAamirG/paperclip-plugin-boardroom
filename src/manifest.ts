@@ -1,4 +1,5 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
+import { buildApiRoutes } from "./api/route-table.js";
 import { BOARDROOM_PLUGIN_ID, BOARDROOM_ROUTE_PATH } from "./constants.js";
 
 const manifest: PaperclipPluginManifestV1 = {
@@ -17,6 +18,8 @@ const manifest: PaperclipPluginManifestV1 = {
     "database.namespace.read",
     "database.namespace.write",
     "agents.read",
+    // Not in the spec list: Room creation must check that the chosen project is in the company.
+    "projects.read",
     "agent.sessions.create",
     "agent.sessions.send",
     "agent.sessions.close",
@@ -42,6 +45,7 @@ const manifest: PaperclipPluginManifestV1 = {
     // `companies` is listed so every plugin table can reference public.companies(id) ON DELETE CASCADE.
     coreReadTables: ["companies", "heartbeat_runs", "cost_events", "agents"],
   },
+  apiRoutes: buildApiRoutes(),
   ui: {
     slots: [
       {

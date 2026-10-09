@@ -26,7 +26,7 @@ paperclipai plugin install /absolute/path/to/paperclip-plugin-boardroom
 
 ## Repository layout
 
-- `src/manifest.ts`, `src/worker.ts`, `src/ui/`: the plugin.
+- `src/manifest.ts`, `src/worker.ts`, `src/ui/`: the plugin. `src/api/` holds the plugin API (route table, access, audit, live updates, handlers); `src/db/` the company-scoped data access.
 - `migrations/`: SQL migrations the host applies to the plugin's database namespace, in filename order. Qualify every object with the host-derived schema name `plugin_boardroom_79f8e138fc`.
 - `tests/`: worker tests (`*.spec.ts`) and UI tests (`*.spec.tsx`). `tests/support/` holds the test harness.
 - `docs/`: the spec, the glossary (`CONTEXT.md`) and the architecture decision records.
@@ -38,5 +38,5 @@ paperclipai plugin install /absolute/path/to/paperclip-plugin-boardroom
 Known ambiguities:
 
 - Host version is not exposed: the SDK (2026.1005.0) receives `hostVersion` only in the `initialize` RPC and does not put it on `ctx`, so the worker's startup log records `hostVersion: null`.
-- Whether the host accepts the manifest id in the plugin API path (rather than the database id) is unconfirmed; the harness dispatches on the plugin-local path only.
+- The host accepts the manifest id as `:pluginId` in `/api/plugins/:pluginId/api/*` (its router resolves a key or a database id); the harness dispatches on the plugin-local path only.
 - The harness mirrors host release 2026.1005.0 and the drizzle 0.45.2 parameter binding; recheck both when the pinned SDK changes.

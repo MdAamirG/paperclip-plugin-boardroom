@@ -9,12 +9,16 @@ import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 import { pluginManifestV1Schema } from "@paperclipai/shared";
 import { BOARDROOM_NAMESPACE, createBoardroomHarness, type BoardroomHarness } from "./support/harness.js";
 
-/** The 0.x capability list from the spec ("Capabilities (0.x)"), and nothing else. */
+/**
+ * The 0.x capability list from the spec ("Capabilities (0.x)"), plus `projects.read`, which the
+ * spec omits but Room creation needs to check that a chosen project is in the company.
+ */
 const CAPABILITIES_0X = [
   "database.namespace.migrate",
   "database.namespace.read",
   "database.namespace.write",
   "agents.read",
+  "projects.read",
   "agent.sessions.create",
   "agent.sessions.send",
   "agent.sessions.close",
@@ -123,9 +127,9 @@ describe("worker", () => {
     });
   });
 
-  it("answers 404 for every route until routes are built", async () => {
+  it("answers 404 for a route that is not declared", async () => {
     const company = await harness.seedCompany();
-    const response = await harness.request("GET", "/rooms", {
+    const response = await harness.request("GET", "/not-a-route", {
       query: { companyId: company.id },
       actor: company.members.owner,
     });

@@ -31,8 +31,8 @@ export class BoardroomApiError extends Error {
 
 export interface BoardroomApiOptions {
   /**
-   * Path segment the host routes plugin API calls by. Ticket 03 confirms whether the host accepts
-   * the manifest id here or only the installed plugin's database id.
+   * Path segment the host routes plugin API calls by. The host accepts the manifest id (plugin key)
+   * as well as the database id, so the default needs no lookup (confirmed against the host router).
    */
   pluginId?: string;
   fetch?: typeof fetch;
