@@ -24,6 +24,16 @@ Install a local build into a Paperclip instance:
 paperclipai plugin install /absolute/path/to/paperclip-plugin-boardroom
 ```
 
+## Capabilities
+
+The manifest declares: the plugin database namespace (migrate, read, write); `agents.read`; `projects.read` (Room creation checks that the chosen project belongs to the company); agent sessions (create, send, close); `access.members.read`; issues (read, create) and issue documents (write); activity log (write); events (subscribe); jobs (schedule); API routes (register); and UI page, sidebar and action registration. A manifest that declares a capability the host does not know fails to install, so the list only grows with the host.
+
+## Access and company roles
+
+The plugin reads the caller's company role on every request (`ctx.access.members`): owner, admin and operator may post, a viewer may only read, and the Room Owner or a company owner or admin controls a Room. A membership with no role counts as an operator; an unrecognised role counts as a viewer.
+
+In local trusted mode the board user (`local-board`) is a company member only because the host seeds an owner membership for it at startup, and when a company is imported (`POST /companies/import`). A company created any other way has no such membership, so the Boardroom API answers `403 not_a_company_member` for the local board user until the host restarts.
+
 ## Repository layout
 
 - `src/manifest.ts`, `src/worker.ts`, `src/ui/`: the plugin. `src/api/` holds the plugin API (route table, access, audit, live updates, handlers); `src/db/` the company-scoped data access.
