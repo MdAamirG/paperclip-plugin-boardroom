@@ -1,6 +1,7 @@
 import type { AgentSessionEvent, PluginContext } from "@paperclipai/plugin-sdk";
 import { audit } from "../api/audit.js";
-import { announceRoomChanged, touchRoomSafely } from "../api/live.js";
+import { announceRoomChanged } from "../api/live.js";
+import { touchRoomSafely } from "../api/room-touch.js";
 import { toMessageViews } from "../api/message-view.js";
 import {
   countMessages,
