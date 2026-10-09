@@ -45,7 +45,7 @@ import {
   type BoardroomHarness,
   type SeededCompany,
 } from "../support/harness.js";
-import { splitSqlStatements } from "../support/host-sql-rules.js";
+import { splitSqlStatements, validatePluginMigrationStatement } from "../support/host-sql-rules.js";
 
 const NS = BOARDROOM_NAMESPACE;
 const MIGRATIONS_DIR = fileURLToPath(new URL("../../migrations/", import.meta.url));
@@ -159,6 +159,27 @@ describe("migration", () => {
     }
   });
 
+  it("passes the host's statement rules as written, comments included", async () => {
+    const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith(".sql"));
+    for (const file of files) {
+      const text = await readFile(path.join(MIGRATIONS_DIR, file), "utf8");
+      // Raw statements, comments and all: the host scans the comment text of each statement.
+      for (const statement of splitSqlStatements(text)) {
+        expect(() => validatePluginMigrationStatement(statement, NS, manifest.database?.coreReadTables), statement).not.toThrow();
+      }
+      // The host reads an apostrophe in a comment as the start of a string and finds
+      // `from|join|references|into|update <schema>.<table>` inside comment text.
+      const commentLines = text.split("\n").filter((line) => line.includes("--"));
+      expect(commentLines.length, file).toBeGreaterThan(0);
+      for (const line of commentLines) {
+        const comment = line.slice(line.indexOf("--"));
+        expect(comment, line).not.toContain("'");
+        expect(comment, line).not.toMatch(/\b(from|join|references|into|update)\s+"?[A-Za-z_]\w*"?\."?[A-Za-z_]/i);
+      }
+      expect(text, file).not.toContain("/*");
+    }
+  });
+
   it("does not reference public.agents or public.issues, so deleting either never removes Room history", async () => {
     const h = await start();
     const fks = await h.sql<{ ref: string }>(
@@ -243,6 +264,18 @@ describe("rooms", () => {
         [company.id],
       ),
     ).rejects.toThrow(/rooms_status_check/);
+  });
+
+  it("sets the close time exactly when the Room is closed", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const room = await insertRoom(h.ctx.db, company.id, { title: "T", topic: "", ownerUserId: "u" });
+    const set = (fields: string) => h.sql(`UPDATE ${NS}.rooms SET ${fields} WHERE id = $1`, [room.id]);
+    await expect(set("status = 'closed'")).rejects.toThrow(/rooms_closed_at_check/);
+    await expect(set("closed_at = now()")).rejects.toThrow(/rooms_closed_at_check/);
+    await set("status = 'closed', closed_at = now()");
+    expect((await getRoom(h.ctx.db, company.id, room.id))?.status).toBe("closed");
+    await expect(set("closed_at = NULL")).rejects.toThrow(/rooms_closed_at_check/);
   });
 });
 
@@ -375,6 +408,58 @@ describe("rounds", () => {
     expect(typeof stopped?.endedAt).toBe("string");
   });
 
+  it("sets the end time exactly when the Round is stopped or completed", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const { round } = await seedRoomGraph(h, company);
+    const set = (fields: string) => h.sql(`UPDATE ${NS}.rounds SET ${fields} WHERE id = $1`, [round.id]);
+    await expect(set("ended_at = now()")).rejects.toThrow(/rounds_ended_at_check/);
+    await expect(set("status = 'stopped'")).rejects.toThrow(/rounds_ended_at_check/);
+    await expect(set("status = 'completed'")).rejects.toThrow(/rounds_ended_at_check/);
+    await expect(set("status = 'paused', ended_at = now()")).rejects.toThrow(/rounds_ended_at_check/);
+    await set("status = 'completed', ended_at = now()");
+    await expect(set("ended_at = NULL")).rejects.toThrow(/rounds_ended_at_check/);
+  });
+
+  it("changes status only from an expected status when asked to (compare-and-set)", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const db = h.ctx.db;
+    const { round } = await seedRoomGraph(h, company);
+    const active = ["running", "paused"] as const;
+
+    // Wrong expectation: nothing changes, nothing is written.
+    expect(await setRoundStatus(db, company.id, round.id, "completed", { expectedFrom: ["paused"] })).toBe(false);
+    expect(await getRound(db, company.id, round.id)).toMatchObject({ status: "running", endedAt: null });
+    expect(await setRoundStatus(db, company.id, round.id, "completed", { expectedFrom: [] })).toBe(false);
+
+    // A listed status wins, and the end time is set.
+    expect(await setRoundStatus(db, company.id, round.id, "stopped", { expectedFrom: [...active] })).toBe(true);
+    const stopped = await getRound(db, company.id, round.id);
+    expect(stopped?.status).toBe("stopped");
+    expect(typeof stopped?.endedAt).toBe("string");
+
+    // The second caller of a race loses and cannot overwrite the first outcome.
+    expect(await setRoundStatus(db, company.id, round.id, "completed", { expectedFrom: [...active] })).toBe(false);
+    expect(await getRound(db, company.id, round.id)).toMatchObject({ status: "stopped", endedAt: stopped?.endedAt });
+
+    // Without expectedFrom the call is unconditional, as before.
+    expect(await setRoundStatus(db, company.id, round.id, "completed")).toBe(true);
+  });
+
+  it("lets exactly one of two racing compare-and-set calls win", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const db = h.ctx.db;
+    const { round } = await seedRoomGraph(h, company);
+    const results = await Promise.all([
+      setRoundStatus(db, company.id, round.id, "stopped", { expectedFrom: ["running"] }),
+      setRoundStatus(db, company.id, round.id, "completed", { expectedFrom: ["running"] }),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(["stopped", "completed"]).toContain((await getRound(db, company.id, round.id))?.status);
+  });
+
   it("refuses a repeated sequence number in one Room", async () => {
     const h = await start();
     const company = await h.seedCompany();
@@ -443,6 +528,23 @@ describe("turns", () => {
   });
 });
 
+describe("turns run ids", () => {
+  it("lets a run id belong to one Turn only, while Turns without a run id repeat freely", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const { round, turn } = await seedRoomGraph(h, company);
+    const second = await insertTurn(h.ctx.db, company.id, { roundId: round.id, agentId: company.agents[1]!.id, ord: 2 });
+    const third = await insertTurn(h.ctx.db, company.id, { roundId: round.id, agentId: company.agents[2]!.id, ord: 3 });
+    expect([turn.runId, second!.runId, third!.runId]).toEqual([null, null, null]);
+
+    const runId = crypto.randomUUID();
+    await h.sql(`UPDATE ${NS}.turns SET status = 'running', run_id = $1 WHERE id = $2`, [runId, turn.id]);
+    await expect(
+      h.sql(`UPDATE ${NS}.turns SET status = 'running', run_id = $1 WHERE id = $2`, [runId, second!.id]),
+    ).rejects.toThrow(/turns_run_id_uq/);
+  });
+});
+
 describe("room_messages", () => {
   it("refuses a repeated idempotency key in one Room and accepts it in another", async () => {
     const h = await start();
@@ -475,6 +577,37 @@ describe("room_messages", () => {
       expect(await insertMessage(db, company.id, { roomId: room.id, authorKind: "user", authorId: "u", body })).not.toBeNull();
     }
     expect((await listMessages(db, company.id, room.id)).map((m) => m.body)).toEqual(["one", "two"]);
+  });
+
+  it("accepts only the author kinds user and agent", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const { room } = await seedRoomGraph(h, company);
+    await expect(
+      h.sql(
+        `INSERT INTO ${NS}.room_messages (id, company_id, room_id, author_kind, author_id, body)
+         VALUES (gen_random_uuid(), $1, $2, 'system', 'x', 'hello')`,
+        [company.id, room.id],
+      ),
+    ).rejects.toThrow(/violates check constraint/);
+  });
+
+  it("keeps the Round, Turn and run id of a Message consistent with its author kind", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const { room, round, turn, agent } = await seedRoomGraph(h, company);
+    const insert = (kind: string, roundId: string | null, turnId: string | null, runId: string | null) =>
+      h.sql(
+        `INSERT INTO ${NS}.room_messages (id, company_id, room_id, author_kind, author_id, body, round_id, turn_id, run_id)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'x', 'hello', $4, $5, $6)`,
+        [company.id, room.id, kind, roundId, turnId, runId],
+      );
+    await expect(insert("user", round.id, turn.id, null)).rejects.toThrow(/room_messages_agent_refs_check/);
+    await expect(insert("user", null, null, crypto.randomUUID())).rejects.toThrow(/room_messages_agent_refs_check/);
+    await expect(insert("agent", null, null, null)).rejects.toThrow(/room_messages_agent_refs_check/);
+    await expect(insert("agent", round.id, null, null)).rejects.toThrow(/room_messages_agent_refs_check/);
+    await insert("agent", round.id, turn.id, null);
+    expect(agent.id).toBeTruthy();
   });
 
   it("stores the Round, Turn and run id on agent Messages only", async () => {
@@ -589,5 +722,142 @@ describe("company scoping: a read with company A's id never returns company B's 
     const { db, a, graphB } = await twoCompanies();
     expect(await listWorkLinks(db, a.id, graphB.room.id)).toEqual([]);
     expect(await listWorkLinksForIssue(db, a.id, graphB.issueId)).toEqual([]);
+  });
+});
+
+describe("same-Room links", () => {
+  async function twoRooms() {
+    const h = await start();
+    const company = await h.seedCompany();
+    const graph = await seedRoomGraph(h, company);
+    const other = await insertRoom(h.ctx.db, company.id, { title: "Other", topic: "", ownerUserId: "u" });
+    return { h, company, graph, other };
+  }
+
+  it("refuses a Round whose trigger Message belongs to another Room", async () => {
+    const { h, company, graph, other } = await twoRooms();
+    await expect(
+      insertRound(h.ctx.db, company.id, {
+        roomId: other.id,
+        seq: 1,
+        startedByUserId: "u",
+        triggerMessageId: graph.message.id,
+        askAll: false,
+        addressedAgentIds: [],
+      }),
+    ).rejects.toThrow();
+    await expect(
+      h.sql(
+        `INSERT INTO ${NS}.rounds (id, company_id, room_id, seq, started_by_user_id, trigger_message_id)
+         VALUES (gen_random_uuid(), $1, $2, 1, 'u', $3)`,
+        [company.id, other.id, graph.message.id],
+      ),
+    ).rejects.toThrow(/rounds_trigger_message_fk/);
+    // The same Message in its own Room is fine.
+    await setRoundStatus(h.ctx.db, company.id, graph.round.id, "completed");
+    expect(
+      await insertRound(h.ctx.db, company.id, {
+        roomId: graph.room.id,
+        seq: 2,
+        startedByUserId: "u",
+        triggerMessageId: graph.message.id,
+        askAll: false,
+        addressedAgentIds: [],
+      }),
+    ).not.toBeNull();
+  });
+
+  it("refuses an agent Message that points at a Round of another Room", async () => {
+    const { h, company, graph, other } = await twoRooms();
+    await expect(
+      insertMessage(h.ctx.db, company.id, {
+        roomId: other.id,
+        authorKind: "agent",
+        authorId: graph.agent.id,
+        body: "wrong room",
+        roundId: graph.round.id,
+        turnId: graph.turn.id,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      h.sql(
+        `INSERT INTO ${NS}.room_messages (id, company_id, room_id, author_kind, author_id, body, round_id, turn_id)
+         VALUES (gen_random_uuid(), $1, $2, 'agent', $3, 'x', $4, $5)`,
+        [company.id, other.id, graph.agent.id, graph.round.id, graph.turn.id],
+      ),
+    ).rejects.toThrow(/room_messages_round_fk/);
+    expect(await listMessages(h.ctx.db, company.id, other.id)).toEqual([]);
+  });
+});
+
+describe("company scoping of writes: a write with company B's id cannot touch company A's rows", () => {
+  async function twoCompanies() {
+    const h = await start();
+    const a = await h.seedCompany();
+    const b = await h.seedCompany();
+    const graphA = await seedRoomGraph(h, a);
+    return { h, db: h.ctx.db, a, b, graphA };
+  }
+
+  it("rooms and participants", async () => {
+    const { h, db, b, graphA } = await twoCompanies();
+    await expect(
+      insertParticipant(db, b.id, { roomId: graphA.room.id, agentId: b.agents[0]!.id, addedByUserId: "u" }),
+    ).rejects.toThrow();
+    expect(await listActiveParticipants(db, graphA.room.companyId, graphA.room.id)).toHaveLength(1);
+    expect(await h.sql(`SELECT 1 FROM ${NS}.room_participants WHERE company_id = $1`, [b.id])).toEqual([]);
+  });
+
+  it("messages", async () => {
+    const { h, db, b, graphA } = await twoCompanies();
+    await expect(
+      insertMessage(db, b.id, { roomId: graphA.room.id, authorKind: "user", authorId: "u", body: "intruder" }),
+    ).rejects.toThrow();
+    // Not even a Message of company B pointing at company A's Round.
+    await expect(
+      insertMessage(db, b.id, {
+        roomId: graphA.room.id,
+        authorKind: "agent",
+        authorId: b.agents[0]!.id,
+        body: "intruder",
+        roundId: graphA.round.id,
+        turnId: graphA.turn.id,
+      }),
+    ).rejects.toThrow();
+    expect(await h.sql(`SELECT 1 FROM ${NS}.room_messages WHERE company_id = $1`, [b.id])).toEqual([]);
+  });
+
+  it("rounds", async () => {
+    const { h, db, b, graphA } = await twoCompanies();
+    // With A's Round still active the insert would be a silent no-op; free the Room first.
+    await setRoundStatus(db, graphA.room.companyId, graphA.round.id, "completed");
+    await expect(
+      insertRound(db, b.id, {
+        roomId: graphA.room.id,
+        seq: 2,
+        startedByUserId: "u",
+        triggerMessageId: graphA.message.id,
+        askAll: false,
+        addressedAgentIds: [],
+      }),
+    ).rejects.toThrow();
+    expect(await setRoundStatus(db, b.id, graphA.round.id, "stopped")).toBe(false);
+    expect(await setRoundStatus(db, b.id, graphA.round.id, "stopped", { expectedFrom: ["running"] })).toBe(false);
+    expect((await getRound(db, graphA.room.companyId, graphA.round.id))?.status).toBe("completed");
+    expect(await h.sql(`SELECT 1 FROM ${NS}.rounds WHERE company_id = $1`, [b.id])).toEqual([]);
+  });
+
+  it("turns", async () => {
+    const { h, db, b, graphA } = await twoCompanies();
+    await expect(insertTurn(db, b.id, { roundId: graphA.round.id, agentId: b.agents[0]!.id, ord: 2 })).rejects.toThrow();
+    expect(await h.sql(`SELECT 1 FROM ${NS}.turns WHERE company_id = $1`, [b.id])).toEqual([]);
+  });
+
+  it("work links", async () => {
+    const { h, db, b, graphA } = await twoCompanies();
+    await expect(
+      insertWorkLink(db, b.id, { roomId: graphA.room.id, issueId: crypto.randomUUID(), relation: "linked", byUserId: "u" }),
+    ).rejects.toThrow();
+    expect(await h.sql(`SELECT 1 FROM ${NS}.work_links WHERE company_id = $1`, [b.id])).toEqual([]);
   });
 });
