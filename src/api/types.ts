@@ -36,6 +36,8 @@ export interface RoomDetail {
 
 export interface RoomListResponse {
   rooms: RoomSummary[];
+  /** The actor's rights in this company, so the list can hide "New Room" from viewers. */
+  permissions: { role: CompanyRole; canPost: boolean };
 }
 
 export interface CreateRoomRequest {
