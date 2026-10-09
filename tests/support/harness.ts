@@ -245,7 +245,8 @@ async function createDatabase(
   return PGlite.create({ parsers: PARSERS, loadDataDir: snapshot });
 }
 
-async function applyMigrations(
+/** Apply a migration directory as the host does: one transaction, host statement rules, filename order. */
+export async function applyMigrations(
   pg: PGlite,
   manifest: PaperclipPluginManifestV1,
   namespace: string,
@@ -276,6 +277,20 @@ async function applyMigrations(
   });
 }
 
+/**
+ * Run a validated plugin statement. The host runs plugin SQL through drizzle, which wraps every
+ * database error as `Failed query: <sql>\nparams: <params>`; only that message crosses the worker
+ * RPC. So the plugin never sees a constraint name or SQLSTATE, and must detect conflicts another
+ * way (for example `ON CONFLICT ... DO NOTHING` and the row count).
+ */
+async function runAsHost<T>(pg: PGlite, sql: string, params: unknown[]) {
+  try {
+    return await pg.query<T>(sql, viaJson(params));
+  } catch {
+    throw new Error(`Failed query: ${sql}\nparams: ${params.join(",")}`);
+  }
+}
+
 function createDbClient(pg: PGlite, manifest: PaperclipPluginManifestV1, namespace: string): PluginDatabaseClient {
   const coreReadTables = manifest.database?.coreReadTables ?? [];
   return {
@@ -284,14 +299,14 @@ function createDbClient(pg: PGlite, manifest: PaperclipPluginManifestV1, namespa
       requireCapability(manifest, "database.namespace.read");
       validatePluginRuntimeQuery(sql, namespace, coreReadTables);
       assertParamsBound(sql, params);
-      const result = await pg.query<T>(sql, viaJson(params));
+      const result = await runAsHost<T>(pg, sql, params);
       return viaJson(result.rows);
     },
     async execute(sql: string, params: unknown[] = []): Promise<{ rowCount: number }> {
       requireCapability(manifest, "database.namespace.write");
       validatePluginRuntimeExecute(sql, namespace);
       assertParamsBound(sql, params);
-      const result = await pg.query(sql, viaJson(params));
+      const result = await runAsHost(pg, sql, params);
       return { rowCount: result.affectedRows ?? 0 };
     },
   };

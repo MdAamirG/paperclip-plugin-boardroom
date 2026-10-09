@@ -65,6 +65,18 @@ describe("PGlite database swap", () => {
     expect(costs[0]!.total).toBe("42");
   });
 
+  it("reports a failed statement as the host does: drizzle's 'Failed query' message, no constraint name", async () => {
+    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
+    const company = await harness.seedCompany();
+    const id = "6f1d1a52-8d5c-4b8e-9d1e-0a6a2a1f9b11";
+    const insert = `INSERT INTO ${T} (id, company_id, body) VALUES ($1, $2, $3)`;
+    await harness.ctx.db.execute(insert, [id, company.id, "first"]);
+    const error = await harness.ctx.db.execute(insert, [id, company.id, "again"]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(`Failed query: ${insert}\nparams: ${id},${company.id},again`);
+    expect((error as Error).message).not.toMatch(/duplicate key|fixture_notes_pkey/);
+  });
+
   it("refuses a runtime CREATE TABLE", async () => {
     harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS });
     await expect(
