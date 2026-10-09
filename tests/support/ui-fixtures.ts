@@ -1,5 +1,5 @@
 /** Builders for the API shapes the UI tests mock. */
-import type { Room, RoomDetail, RoomSummary } from "../../src/api/types.js";
+import type { MessageView, Room, RoomDetail, RoomSummary } from "../../src/api/types.js";
 import type { HostAgent } from "../../src/ui/api.js";
 
 export const COMPANY_ID = "company-1";
@@ -52,3 +52,20 @@ export const LIST_PERMISSIONS = {
   owner: { role: "owner", canPost: true },
   viewer: { role: "viewer", canPost: false },
 } as const;
+
+export function messageFixture(overrides: Partial<MessageView> = {}): MessageView {
+  const id = overrides.id ?? "m1";
+  return {
+    id,
+    roomId: "room-1",
+    authorKind: "user",
+    authorId: "user-owner-1",
+    authorName: null,
+    body: `Body of ${id}`,
+    createdAt: "2026-10-01T09:00:00.000Z",
+    roundId: null,
+    turnId: null,
+    runId: null,
+    ...overrides,
+  };
+}

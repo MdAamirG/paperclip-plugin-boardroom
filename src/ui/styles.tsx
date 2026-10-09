@@ -65,6 +65,14 @@ textarea.br-input { resize: vertical; min-height: ${SPACE(24)}; }
 .br-nav:hover { background: color-mix(in oklab, var(--accent) 50%, transparent); color: var(--foreground); }
 .br-nav[aria-current="page"] { background: var(--accent); color: var(--foreground); }
 .br-icon { flex-shrink: 0; width: ${SPACE(4)}; height: ${SPACE(4)}; }
+.br-transcript { display: flex; flex-direction: column; gap: ${SPACE(3)}; max-height: ${SPACE(120)}; overflow-y: auto; padding-right: ${SPACE(1)}; }
+.br-message { display: flex; flex-direction: column; gap: ${SPACE(1)}; padding: ${SPACE(3)}; border: thin solid var(--border); border-radius: var(--radius-md, 0.375rem); min-width: 0; overflow-wrap: anywhere; }
+.br-message[data-author-kind="agent"] { background: color-mix(in oklab, var(--muted) 40%, transparent); }
+.br-message-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: ${SPACE(2)}; }
+.br-composer-input { min-height: ${SPACE(24)}; }
+.br-mention-list { display: flex; flex-direction: column; border: thin solid var(--border); border-radius: var(--radius-md, 0.375rem); background: var(--card); max-height: ${SPACE(48)}; overflow-y: auto; }
+.br-mention-option { display: flex; align-items: baseline; justify-content: space-between; gap: ${SPACE(3)}; padding: ${SPACE(2)} ${SPACE(3)}; cursor: pointer; }
+.br-mention-option[data-active="true"], .br-mention-option:hover { background: var(--accent); }
 .br-visually-hidden { position: absolute; width: ${SPACE(0.25)}; height: ${SPACE(0.25)}; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 `;
 
