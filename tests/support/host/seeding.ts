@@ -8,6 +8,9 @@ import type { TestHarness } from "@paperclipai/plugin-sdk/testing";
 import type { Agent, Company } from "@paperclipai/shared";
 import type { HostRecords } from "./records.js";
 
+/** The local board user id of local trusted mode. */
+const BOARD_USER_ID = "local-board";
+
 export const MEMBER_ROLES = ["owner", "admin", "operator", "viewer"] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 
@@ -113,6 +116,19 @@ export class Seeder {
       });
       members[role] = member;
     }
+    // The host gives the local board user an owner membership in every company at startup
+    // (`ensureLocalTrustedBoardPrincipal`), so plugins find a role for it like for any member.
+    this.records.accessMembers.push({
+      id: randomUUID(),
+      companyId: id,
+      principalType: "user",
+      principalId: BOARD_USER_ID,
+      status: "active",
+      membershipRole: "owner",
+      grants: [],
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
 
     this.currentSdk().seed({
       companies: [company],

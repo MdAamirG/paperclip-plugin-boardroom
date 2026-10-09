@@ -126,7 +126,9 @@ describe("seed helpers", () => {
     const company = await harness.seedCompany({ agents: ["CEO"] });
 
     const members = await harness.ctx.access.members.list({ companyId: company.id });
-    expect(members.map((m) => m.membershipRole).sort()).toEqual(["admin", "operator", "owner", "viewer"]);
+    // One member per role, plus the local board user (an owner in every company, as at the host).
+    expect(members.map((m) => m.membershipRole).sort()).toEqual(["admin", "operator", "owner", "owner", "viewer"]);
+    expect(members.filter((m) => m.principalId === "local-board").map((m) => m.membershipRole)).toEqual(["owner"]);
     expect(company.members.viewer.role).toBe("viewer");
 
     const agents = await harness.ctx.agents.list({ companyId: company.id });
@@ -207,7 +209,11 @@ describe("request()", () => {
 
   it("answers 404 when the manifest declares no apiRoutes, without calling the worker", async () => {
     const calls: PluginApiRequestInput[] = [];
-    harness = await createBoardroomHarness({ migrationsDir: FIXTURE_MIGRATIONS, plugin: routedPlugin(calls) });
+    harness = await createBoardroomHarness({
+      migrationsDir: FIXTURE_MIGRATIONS,
+      manifest: { ...defaultManifest, apiRoutes: undefined },
+      plugin: routedPlugin(calls),
+    });
     const company = await harness.seedCompany();
     const response = await harness.request("GET", "/rooms", { query: { companyId: company.id } });
     expect(response).toMatchObject({ status: 404, body: { error: "Plugin API route not found" } });
