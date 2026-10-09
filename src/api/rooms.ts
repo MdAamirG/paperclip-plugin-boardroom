@@ -19,6 +19,7 @@ import { audit } from "./audit.js";
 import type { RouteContext, RouteHandler } from "./context.js";
 import { ApiError, badRequest, ok, roomNotFound, unprocessable } from "./errors.js";
 import { announceRoomChanged } from "./live.js";
+import { decisionViewFor } from "./decision-view.js";
 import type { ParticipantView, RoomDetail, RoomListResponse } from "./types.js";
 import { isUuid, optionalId, readBody, requiredString } from "./validation.js";
 
@@ -64,7 +65,8 @@ export async function buildRoomDetail(ctx: PluginContext, actor: Actor, room: Ro
       };
     }),
   );
-  return { room, participants: views, activeRound, workLinks, permissions: permissionsFor(actor, room) };
+  const decision = await decisionViewFor(ctx, room);
+  return { room, participants: views, activeRound, workLinks, decision, permissions: permissionsFor(actor, room) };
 }
 
 export const listRooms: RouteHandler = async ({ ctx, input, actor }) => {

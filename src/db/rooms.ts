@@ -105,3 +105,26 @@ export async function deleteRoom(db: Db, companyId: string, roomId: string): Pro
   ]);
   return rowCount > 0;
 }
+
+/**
+ * Store the Decision record, or clear it (`markdown` null). Saving stamps the writer and the time in
+ * the database; clearing empties all three columns. `updated_at` is bumped here because nothing
+ * does it automatically. Returns false when the Room does not exist in this company.
+ */
+export async function setRoomDecision(
+  db: Db,
+  companyId: string,
+  roomId: string,
+  decision: { markdown: string; byUserId: string } | null,
+): Promise<boolean> {
+  const { rowCount } = await db.execute(
+    `UPDATE ${table(db, "rooms")}
+        SET decision_md = $3::text,
+            decision_by_user_id = $4::text,
+            decision_at = CASE WHEN $3::text IS NULL THEN NULL ELSE now() END,
+            updated_at = now()
+      WHERE company_id = $1 AND id = $2`,
+    [companyId, roomId, decision?.markdown ?? null, decision?.byUserId ?? null],
+  );
+  return rowCount > 0;
+}
