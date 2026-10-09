@@ -39,7 +39,8 @@ const manifest: PaperclipPluginManifestV1 = {
   database: {
     namespaceSlug: "boardroom",
     migrationsDir: "migrations",
-    coreReadTables: ["heartbeat_runs", "cost_events", "agents"],
+    // `companies` is listed so every plugin table can reference public.companies(id) ON DELETE CASCADE.
+    coreReadTables: ["companies", "heartbeat_runs", "cost_events", "agents"],
   },
   ui: {
     slots: [

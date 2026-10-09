@@ -85,7 +85,7 @@ describe("built manifest", () => {
     expect(built.database).toEqual({
       namespaceSlug: "boardroom",
       migrationsDir: "migrations",
-      coreReadTables: ["heartbeat_runs", "cost_events", "agents"],
+      coreReadTables: ["companies", "heartbeat_runs", "cost_events", "agents"],
     });
   });
 
