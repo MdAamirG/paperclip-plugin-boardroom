@@ -97,7 +97,7 @@ export function getMessageByIdempotencyKey(
   );
 }
 
-/** Every Message of a Room, oldest first. Ticket 05 adds paging. */
+/** Every Message of a Room, oldest first. For the transcript use `listMessagesPage`. */
 export function listMessages(db: Db, companyId: string, roomId: string): Promise<RoomMessage[]> {
   return selectMany(
     db,
@@ -105,4 +105,62 @@ export function listMessages(db: Db, companyId: string, roomId: string): Promise
     [companyId, roomId],
     mapMessage,
   );
+}
+
+export const DEFAULT_MESSAGE_PAGE_SIZE = 50;
+export const MAX_MESSAGE_PAGE_SIZE = 200;
+
+export interface MessagePage {
+  /** Oldest first, so the newest Message is last. */
+  messages: RoomMessage[];
+  /**
+   * More Messages exist beyond this page in the direction it travelled: older ones for the latest
+   * page and for `before`, newer ones for `after`.
+   */
+  hasMore: boolean;
+}
+
+/**
+ * One page of a Room's transcript in a stable order (`created_at`, then `id`). The page is always
+ * returned oldest first.
+ *
+ * - No cursor: the latest `limit` Messages.
+ * - `before`: the `limit` Messages immediately older than that Message (older pages, no overlap).
+ * - `after`: the `limit` Messages immediately newer than that Message (live catch-up).
+ *
+ * The cursor Message must be in this Room (the caller checks with `getMessage`); an unknown cursor
+ * gives an empty page. Ticket 06 builds the Turn prompt from `listMessagesPage(db, c, r, { limit })`.
+ */
+export async function listMessagesPage(
+  db: Db,
+  companyId: string,
+  roomId: string,
+  options: { limit?: number; before?: string; after?: string } = {},
+): Promise<MessagePage> {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? DEFAULT_MESSAGE_PAGE_SIZE), 1), MAX_MESSAGE_PAGE_SIZE);
+  const messages = table(db, "room_messages");
+  const cursor = options.before ?? options.after ?? null;
+  // Each `$n` occurrence is bound separately by the host, so a repeated value gets its own number.
+  const params: unknown[] = [companyId, roomId];
+  let cursorClause = "";
+  if (cursor !== null) {
+    params.push(companyId, roomId, cursor);
+    const op = options.before !== undefined ? "<" : ">";
+    cursorClause = `AND (created_at, id) ${op} (SELECT c.created_at, c.id FROM ${messages} c WHERE c.company_id = $3 AND c.room_id = $4 AND c.id = $5)`;
+  }
+  const newestFirst = options.after === undefined;
+  params.push(limit + 1);
+  const rows = await selectMany(
+    db,
+    `SELECT * FROM ${messages}
+     WHERE company_id = $1 AND room_id = $2 ${cursorClause}
+     ORDER BY created_at ${newestFirst ? "DESC" : "ASC"}, id ${newestFirst ? "DESC" : "ASC"}
+     LIMIT $${params.length}`,
+    params,
+    mapMessage,
+  );
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  if (newestFirst) page.reverse();
+  return { messages: page, hasMore };
 }

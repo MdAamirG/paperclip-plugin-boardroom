@@ -1,6 +1,13 @@
 import { createContext, createElement, useContext, useMemo, type ReactNode } from "react";
 import { BOARDROOM_PLUGIN_ID } from "../constants.js";
-import type { CreateRoomRequest, RoomDetail, RoomListResponse } from "../api/types.js";
+import type {
+  CreateRoomRequest,
+  MessageListResponse,
+  RoomDetail,
+  RoomListResponse,
+  SendMessageRequest,
+  SendMessageResponse,
+} from "../api/types.js";
 
 /**
  * Client for the plugin's scoped JSON routes (`/api/plugins/:pluginId/api/*`).
@@ -109,8 +116,9 @@ export interface BoardroomClient {
   updateRoom<T = unknown>(roomId: string, patch: JsonObject): Promise<T>;
   addParticipant<T = unknown>(roomId: string, agentId: string): Promise<T>;
   removeParticipant<T = unknown>(roomId: string, agentId: string): Promise<T>;
-  listMessages<T = unknown>(roomId: string, query?: Record<string, string>): Promise<T>;
-  sendMessage<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
+  /** One page of the transcript, oldest first: the latest `limit`, or those just before / after a Message id. */
+  listMessages(roomId: string, page?: { limit?: number; before?: string; after?: string }): Promise<MessageListResponse>;
+  sendMessage(roomId: string, input: Omit<SendMessageRequest, "companyId">): Promise<SendMessageResponse>;
   listRounds<T = unknown>(roomId: string): Promise<T>;
   getCosts<T = unknown>(roomId: string): Promise<T>;
   pauseRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
@@ -124,6 +132,14 @@ export interface BoardroomClient {
   listRoomsForIssue<T = unknown>(issueId: string): Promise<T>;
 }
 
+function messagePageQuery(page: { limit?: number; before?: string; after?: string } = {}): Record<string, string> {
+  const query: Record<string, string> = {};
+  if (page.limit !== undefined) query.limit = String(page.limit);
+  if (page.before !== undefined) query.before = page.before;
+  if (page.after !== undefined) query.after = page.after;
+  return query;
+}
+
 export function createBoardroomClient(api: BoardroomApi, companyId: string): BoardroomClient {
   const room = (roomId: string) => `/rooms/${encodeURIComponent(roomId)}`;
   const scoped = { companyId };
@@ -134,8 +150,8 @@ export function createBoardroomClient(api: BoardroomApi, companyId: string): Boa
     updateRoom: (roomId, patch) => api.patch(room(roomId), { ...patch, companyId }),
     addParticipant: (roomId, agentId) => api.post(`${room(roomId)}/participants`, { agentId, companyId }),
     removeParticipant: (roomId, agentId) => api.delete(`${room(roomId)}/participants/${encodeURIComponent(agentId)}`, scoped),
-    listMessages: (roomId, query) => api.get(`${room(roomId)}/messages`, { ...query, ...scoped }),
-    sendMessage: (roomId, body) => api.post(`${room(roomId)}/messages`, { ...body, companyId }),
+    listMessages: (roomId, page) => api.get(`${room(roomId)}/messages`, { ...messagePageQuery(page), ...scoped }),
+    sendMessage: (roomId, input) => api.post(`${room(roomId)}/messages`, { ...input, companyId }),
     listRounds: (roomId) => api.get(`${room(roomId)}/rounds`, scoped),
     getCosts: (roomId) => api.get(`${room(roomId)}/costs`, scoped),
     pauseRound: (roomId, roundId) => api.post(`${room(roomId)}/rounds/${encodeURIComponent(roundId)}/pause`, { companyId }),

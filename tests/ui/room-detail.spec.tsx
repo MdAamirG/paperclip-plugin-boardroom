@@ -9,6 +9,8 @@ const ROOM_PATH = "/rooms/room-1";
 const REGIONS = ["round-progress", "transcript", "composer", "participants", "cost", "follow-up-work", "decision-record"];
 
 function renderRoom(api: MockBoardroomApi, roomId = "room-1") {
+  // The transcript region loads its own data; these tests are about the shell, so every Room has an empty one.
+  for (const id of ["room-1", "room-2"]) api.on("GET", `/rooms/${id}/messages`, { messages: [], hasMore: false });
   sdkUi.setLocation(`/C1/boardroom/${roomId}`);
   return renderWithBoardroom((context) => <BoardroomPage context={context} />, { api });
 }
@@ -68,13 +70,13 @@ describe("Room detail shell", () => {
   it("lets an owner or operator see the composer region, and shows a read-only notice to a viewer", async () => {
     const owner = renderRoom(createMockApi().on("GET", ROOM_PATH, detailFixture()));
     await screen.findByRole("heading", { level: 1 });
-    expect(within(region("composer")!).getByText("The composer will appear here.")).toBeInTheDocument();
+    expect(within(region("composer")!).getByRole("textbox", { name: /Message/ })).toBeInTheDocument();
     owner.unmount();
 
     renderRoom(createMockApi().on("GET", ROOM_PATH, detailFixture({ permissions: { role: "viewer", canPost: false, canControl: false } })));
     await screen.findByRole("heading", { level: 1 });
     const composer = within(region("composer")!);
-    expect(composer.queryByText("The composer will appear here.")).not.toBeInTheDocument();
+    expect(composer.queryByRole("textbox")).not.toBeInTheDocument();
     expect(composer.getByRole("status")).toHaveTextContent("Your role can read this Room but not post in it.");
   });
 

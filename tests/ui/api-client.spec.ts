@@ -65,7 +65,7 @@ describe("BoardroomClient", () => {
       ["participants.add", () => client.addParticipant(room, "a1"), { method: "POST", url: `${BASE}/rooms/r1/participants`, body: { agentId: "a1", companyId: "c1" } }],
       ["participants.remove", () => client.removeParticipant(room, "a1"), { method: "DELETE", url: `${BASE}/rooms/r1/participants/a1?companyId=c1` }],
       ["messages.list", () => client.listMessages(room), { method: "GET", url: `${BASE}/rooms/r1/messages?companyId=c1` }],
-      ["messages.send", () => client.sendMessage(room, { body: "hi" }), { method: "POST", url: `${BASE}/rooms/r1/messages`, body: { body: "hi", companyId: "c1" } }],
+      ["messages.send", () => client.sendMessage(room, { body: "hi", idempotencyKey: "k1" }), { method: "POST", url: `${BASE}/rooms/r1/messages`, body: { body: "hi", idempotencyKey: "k1", companyId: "c1" } }],
       ["rounds.list", () => client.listRounds(room), { method: "GET", url: `${BASE}/rooms/r1/rounds?companyId=c1` }],
       ["costs.get", () => client.getCosts(room), { method: "GET", url: `${BASE}/rooms/r1/costs?companyId=c1` }],
       ["rounds.pause", () => client.pauseRound(room, "x1"), { method: "POST", url: `${BASE}/rooms/r1/rounds/x1/pause`, body: { companyId: "c1" } }],
