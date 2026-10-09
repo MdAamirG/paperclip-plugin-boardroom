@@ -203,7 +203,7 @@ describe("Per-Turn cost", () => {
     const rows = screen.getAllByRole("listitem");
     expect(rows[0]).toHaveTextContent("Ada Replied $1.25 · 1,000 in · 200 out");
     expect(rows[1]).toHaveTextContent("Grace Stayed silent $0 (subscription) · 40 in · 2 out");
-    expect(rows[2]).toHaveTextContent("Linus Skipped the Round was stopped");
+    expect(rows[2]).toHaveTextContent("Linus Stopped the Round was stopped");
     expect(rows[2]).not.toHaveTextContent("$");
     expect(rows[3]).toHaveTextContent("Ken Skipped the agent cannot be woken");
     expect(rows[4]).toHaveTextContent("Dennis Waiting");
