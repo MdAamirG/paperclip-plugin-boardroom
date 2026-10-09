@@ -19,6 +19,7 @@ import type {
   SpinnerProps,
   StatusBadgeProps,
   MarkdownBlockProps,
+  MarkdownEditorProps,
 } from "@paperclipai/plugin-sdk/ui";
 
 export type * from "@paperclipai/plugin-sdk/ui";
@@ -213,5 +214,22 @@ export function ProjectPicker({ value, onChange, placeholder, noneLabel }: Proje
         </option>
       ))}
     </select>
+  );
+}
+
+/** A plain textarea; `onSubmit` runs on Ctrl+Enter, like the host editor's Cmd/Ctrl+Enter. */
+export function MarkdownEditor({ value, onChange, placeholder, readOnly, onSubmit }: MarkdownEditorProps) {
+  return (
+    <textarea
+      data-testid="markdown-editor"
+      aria-label={placeholder ?? "Markdown editor"}
+      placeholder={placeholder}
+      readOnly={readOnly}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onSubmit?.();
+      }}
+    />
   );
 }

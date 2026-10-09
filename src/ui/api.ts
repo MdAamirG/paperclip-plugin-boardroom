@@ -1,6 +1,6 @@
 import { createContext, createElement, useContext, useMemo, type ReactNode } from "react";
 import { BOARDROOM_PLUGIN_ID } from "../constants.js";
-import type { CreateRoomRequest, RoomDetail, RoomListResponse } from "../api/types.js";
+import type { CreateRoomRequest, RoomDetail, RoomListResponse, UpdateDecisionRequest } from "../api/types.js";
 
 /**
  * Client for the plugin's scoped JSON routes (`/api/plugins/:pluginId/api/*`).
@@ -117,7 +117,8 @@ export interface BoardroomClient {
   resumeRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   stopRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   closeRoom<T = unknown>(roomId: string): Promise<T>;
-  updateDecision<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
+  /** Save the Decision record (an empty string clears it); answers with the Room detail. */
+  updateDecision(roomId: string, body: Pick<UpdateDecisionRequest, "decisionMd">): Promise<RoomDetail>;
   createWork<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
   addWorkLink<T = unknown>(roomId: string, body: JsonObject): Promise<T>;
   removeWorkLink<T = unknown>(roomId: string, issueId: string): Promise<T>;
