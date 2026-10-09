@@ -1,5 +1,6 @@
 import { definePlugin, runWorker, type PluginContext } from "@paperclipai/plugin-sdk";
 import { handleApiRequest } from "./api/router.js";
+import { registerRecovery } from "./engine/recovery.js";
 
 /** The context from `setup`, which the API handler needs. One worker serves one plugin. */
 let workerCtx: PluginContext | null = null;
@@ -18,6 +19,7 @@ const plugin = definePlugin({
       databaseNamespace: ctx.db.namespace,
       hostVersion: null,
     });
+    registerRecovery(ctx);
   },
 
   async onApiRequest(input) {

@@ -1,6 +1,6 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 import { buildApiRoutes } from "./api/route-table.js";
-import { BOARDROOM_PLUGIN_ID, BOARDROOM_ROUTE_PATH } from "./constants.js";
+import { BOARDROOM_PLUGIN_ID, ROUND_SWEEP_JOB_KEY, BOARDROOM_ROUTE_PATH } from "./constants.js";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: BOARDROOM_PLUGIN_ID,
@@ -45,6 +45,14 @@ const manifest: PaperclipPluginManifestV1 = {
     // `companies` is listed so every plugin table can reference public.companies(id) ON DELETE CASCADE.
     coreReadTables: ["companies", "heartbeat_runs", "cost_events", "agents"],
   },
+  jobs: [
+    {
+      jobKey: ROUND_SWEEP_JOB_KEY,
+      displayName: "Round sweep",
+      description: "Settles Turns whose run ended while the live event was lost and picks up Rounds with nothing in flight.",
+      schedule: "* * * * *",
+    },
+  ],
   apiRoutes: buildApiRoutes(),
   ui: {
     slots: [
