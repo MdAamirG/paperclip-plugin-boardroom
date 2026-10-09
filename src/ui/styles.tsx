@@ -84,6 +84,8 @@ textarea.br-input { resize: vertical; min-height: ${SPACE(24)}; }
 .br-work-row { display: flex; flex-direction: column; gap: ${SPACE(1.5)}; padding: ${SPACE(2)} 0; border-bottom: thin solid var(--border); }
 .br-work-row:last-child { border-bottom: 0; }
 .br-work-link { color: var(--foreground); font-weight: 500; overflow-wrap: anywhere; }
+.br-from-room { position: relative; display: inline-flex; align-items: center; gap: ${SPACE(1)}; }
+.br-from-room-list { position: absolute; top: 100%; left: 0; z-index: 10; display: flex; flex-direction: column; gap: ${SPACE(1)}; min-width: ${SPACE(48)}; margin-top: ${SPACE(1)}; padding: ${SPACE(2)}; border: thin solid var(--border); border-radius: var(--radius-md, 0.375rem); background: var(--card); }
 .br-visually-hidden { position: absolute; width: ${SPACE(0.25)}; height: ${SPACE(0.25)}; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 `;
 

@@ -4,6 +4,7 @@ import type {
   CreateRoomRequest,
   CreateWorkRequest,
   CreateWorkResponse,
+  IssueRoomsResponse,
   MessageListResponse,
   RemoveWorkLinkResponse,
   RoomDetail,
@@ -145,7 +146,8 @@ export interface BoardroomClient {
   createWork(roomId: string, body: Omit<CreateWorkRequest, "companyId">): Promise<CreateWorkResponse>;
   addWorkLink(roomId: string, body: { issueId: string }): Promise<WorkLinkView>;
   removeWorkLink(roomId: string, issueId: string): Promise<RemoveWorkLinkResponse>;
-  listRoomsForIssue<T = unknown>(issueId: string): Promise<T>;
+  /** The Rooms linked to an issue; the host resolves the company from the issue. */
+  listRoomsForIssue(issueId: string): Promise<IssueRoomsResponse>;
 }
 
 function messagePageQuery(page: { limit?: number; before?: string; after?: string } = {}): Record<string, string> {

@@ -10,6 +10,7 @@ import { addParticipant, closeRoom, removeParticipantRoute, updateRoom } from ".
 import { listRoomRounds } from "./rounds.js";
 import { pauseRoundRoute, resumeRoundRoute, stopRoundRoute } from "./round-controls.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
+import { listRoomsForIssue } from "./issue-rooms.js";
 import { addWorkLink, createWork, removeWorkLink } from "./work.js";
 
 /**
@@ -34,6 +35,7 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "work.create": createWork,
   "work-links.add": addWorkLink,
   "work-links.remove": removeWorkLink,
+  "issues.rooms": listRoomsForIssue,
 };
 
 const KNOWN_ROUTE_KEYS: ReadonlySet<string> = new Set(ROUTE_SPECS.map((spec) => spec.routeKey));

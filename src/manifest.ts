@@ -69,6 +69,13 @@ const manifest: PaperclipPluginManifestV1 = {
         displayName: "Boardroom",
         exportName: "BoardroomSidebarLink",
       },
+      {
+        type: "toolbarButton",
+        id: "boardroom-from-room-chip",
+        displayName: "From Room",
+        exportName: "FromRoomChip",
+        entityTypes: ["issue"],
+      },
     ],
   },
 };

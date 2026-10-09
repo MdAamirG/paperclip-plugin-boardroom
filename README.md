@@ -30,6 +30,8 @@ The manifest declares: the plugin database namespace (migrate, read, write); `ag
 
 Follow-up work uses `issues.read` (the live work list and the link check), `issues.create` (the new task has origin kind `plugin:mdaamirg.boardroom`, origin id = the Room id and `actor.actorUserId` = the acting user) and `issue.documents.write` (the optional `plan` document). All three names are valid in `@paperclipai/plugin-sdk@2026.1005.0`. The host's own HTTP status for a refused task creation does not reach the plugin (the RPC carries a message and a numeric code), so a refusal is answered 422 `issue_create_failed` with the host's message, unless the error carries its own status.
 
+The "From Room" chip is a `toolbarButton` slot on issues (`ui.action.register`). It calls `GET /issues/:issueId/rooms`, which reads `work_links` only (a `created` or a `linked` task shows it), scoped to the company the host resolves from the issue.
+
 ## Access and company roles
 
 The plugin reads the caller's company role on every request (`ctx.access.members`): owner, admin and operator may post, a viewer may only read, and the Room Owner or a company owner or admin controls a Room. A membership with no role counts as an operator; an unrecognised role counts as a viewer.
