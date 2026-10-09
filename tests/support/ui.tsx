@@ -21,7 +21,10 @@ type Responder = unknown | ((call: ApiCall) => unknown | Promise<unknown>);
 export interface MockBoardroomApi extends BoardroomApi {
   /** Every call, oldest first. */
   calls: ApiCall[];
-  /** Answer `method path` with a value, or with a function of the call (throw to fail it). */
+  /**
+   * Answer `method path` with a value, or with a function of the call (throw to fail it). Calls to the
+   * host's own board API (`getHost`) are keyed `GET host:<path>`, for example `GET host:/companies/c1/agents`.
+   */
   on(method: string, path: string, responder: Responder): MockBoardroomApi;
 }
 
@@ -51,7 +54,8 @@ export function createMockApi(): MockBoardroomApi {
     get: (path, query) => call("GET", path, undefined, query),
     post: (path, body) => call("POST", path, body),
     patch: (path, body) => call("PATCH", path, body),
-    delete: (path) => call("DELETE", path),
+    delete: (path, query) => call("DELETE", path, undefined, query),
+    getHost: (path, query) => call("GET", `host:${path}`, undefined, query),
   };
   return api;
 }
