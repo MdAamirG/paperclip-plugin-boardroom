@@ -8,8 +8,18 @@
 -- another company. There are deliberately no foreign keys to public.agents or public.issues: a
 -- deleted agent or issue must never remove Room history.
 --
+-- Same-Room links: a Message and a Round point at each other through (company_id, room_id, id)
+-- keys, so the pair always sits in one company and one Room. A Turn has no room column; the route
+-- layer checks that a Turn belongs to the Room of the Round it is linked to.
+--
 -- The host records a checksum per applied migration. Before 0.1.0 ships this file may be edited;
 -- after that, every schema change is a new numbered file.
+--
+-- WARNING for every comment in this file: the host scans comment text as well as code. It matches
+-- the words from, join, references, into and update when a dotted name follows them, and it reads
+-- an apostrophe as the start of a string. So never put those words before a dotted name in a
+-- comment, and never use an apostrophe in a comment. A violation fails the whole migration at
+-- install. The test in tests/db/tables.spec.ts scans this file for both.
 
 CREATE TABLE plugin_boardroom_79f8e138fc.rooms (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,6 +78,7 @@ CREATE TABLE plugin_boardroom_79f8e138fc.room_messages (
   idempotency_key text,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT room_messages_company_id_uq UNIQUE (company_id, id),
+  CONSTRAINT room_messages_company_room_id_uq UNIQUE (company_id, room_id, id),
   CONSTRAINT room_messages_room_idempotency_uq UNIQUE (room_id, idempotency_key),
   CONSTRAINT room_messages_room_fk FOREIGN KEY (company_id, room_id)
     REFERENCES plugin_boardroom_79f8e138fc.rooms (company_id, id) ON DELETE CASCADE,
@@ -96,11 +107,12 @@ CREATE TABLE plugin_boardroom_79f8e138fc.rounds (
   updated_at timestamptz NOT NULL DEFAULT now(),
   ended_at timestamptz,
   CONSTRAINT rounds_company_id_uq UNIQUE (company_id, id),
+  CONSTRAINT rounds_company_room_id_uq UNIQUE (company_id, room_id, id),
   CONSTRAINT rounds_room_seq_uq UNIQUE (room_id, seq),
   CONSTRAINT rounds_room_fk FOREIGN KEY (company_id, room_id)
     REFERENCES plugin_boardroom_79f8e138fc.rooms (company_id, id) ON DELETE CASCADE,
-  CONSTRAINT rounds_trigger_message_fk FOREIGN KEY (company_id, trigger_message_id)
-    REFERENCES plugin_boardroom_79f8e138fc.room_messages (company_id, id),
+  CONSTRAINT rounds_trigger_message_fk FOREIGN KEY (company_id, room_id, trigger_message_id)
+    REFERENCES plugin_boardroom_79f8e138fc.room_messages (company_id, room_id, id),
   CONSTRAINT rounds_seq_check CHECK (seq >= 1),
   CONSTRAINT rounds_status_check CHECK (status IN ('running', 'paused', 'stopped', 'completed')),
   CONSTRAINT rounds_ended_at_check CHECK ((status IN ('stopped', 'completed')) = (ended_at IS NOT NULL))
@@ -150,8 +162,10 @@ CREATE TABLE plugin_boardroom_79f8e138fc.turns (
   )
 );
 
-CREATE INDEX turns_run_id_idx
-  ON plugin_boardroom_79f8e138fc.turns (run_id);
+-- A run belongs to at most one Turn. Turns that have not started have no run id yet.
+CREATE UNIQUE INDEX turns_run_id_uq
+  ON plugin_boardroom_79f8e138fc.turns (run_id)
+  WHERE run_id IS NOT NULL;
 
 CREATE INDEX turns_company_status_idx
   ON plugin_boardroom_79f8e138fc.turns (company_id, status);
@@ -159,8 +173,8 @@ CREATE INDEX turns_company_status_idx
 -- Agent Messages point back at their Round and Turn. Added here because rounds and turns are
 -- created after room_messages.
 ALTER TABLE plugin_boardroom_79f8e138fc.room_messages
-  ADD CONSTRAINT room_messages_round_fk FOREIGN KEY (company_id, round_id)
-    REFERENCES plugin_boardroom_79f8e138fc.rounds (company_id, id);
+  ADD CONSTRAINT room_messages_round_fk FOREIGN KEY (company_id, room_id, round_id)
+    REFERENCES plugin_boardroom_79f8e138fc.rounds (company_id, room_id, id);
 
 ALTER TABLE plugin_boardroom_79f8e138fc.room_messages
   ADD CONSTRAINT room_messages_turn_fk FOREIGN KEY (company_id, turn_id)
