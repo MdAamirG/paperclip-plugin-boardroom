@@ -10,6 +10,7 @@ import { DecisionRecordRegion } from "../regions/decision-record.js";
 import { FollowUpWorkRegion } from "../regions/follow-up-work.js";
 import type { RegionProps } from "../regions/frame.js";
 import { ParticipantsRegion } from "../regions/participants.js";
+import { RoomSettingsRegion } from "../regions/room-settings.js";
 import { RoundProgressRegion } from "../regions/round-progress.js";
 import { TranscriptRegion } from "../regions/transcript.js";
 import { ErrorNotice, LiveUpdatesNotice } from "./ErrorNotice.js";
@@ -55,6 +56,11 @@ export function RoomDetailPage({ companyId, roomId }: { companyId: string; roomI
       {room.error ? <ErrorNotice title="Could not refresh this Room" error={room.error} onRetry={room.reload} /> : null}
       <LiveUpdatesNotice error={live.streamError} />
       <RoomHeader companyId={companyId} detail={room.data} />
+      {room.data.room.status === "closed" ? (
+        <p className="br-notice br-notice-warn" role="status" data-testid="closed-banner">
+          This Room is closed{room.data.room.closedAt ? ` (${formatTimestamp(room.data.room.closedAt)})` : ""}. Its record is read-only; you can still link follow-up work.
+        </p>
+      ) : null}
       <div className="br-layout">
         <div className="br-stack">
           <RoundProgressRegion {...regionProps} />
@@ -63,6 +69,7 @@ export function RoomDetailPage({ companyId, roomId }: { companyId: string; roomI
         </div>
         <div className="br-stack">
           <ParticipantsRegion {...regionProps} />
+          <RoomSettingsRegion {...regionProps} />
           <CostStripRegion {...regionProps} />
           <FollowUpWorkRegion {...regionProps} />
           <DecisionRecordRegion {...regionProps} />

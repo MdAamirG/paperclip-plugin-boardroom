@@ -107,8 +107,6 @@ export function createBoardroomApi(options: BoardroomApiOptions = {}): Boardroom
   };
 }
 
-type JsonObject = Record<string, unknown>;
-
 /**
  * One typed function per route of the plugin API, with the company id added the way each route
  * expects it (query for GET and DELETE, body for POST and PATCH; the issue lookup resolves the
@@ -119,9 +117,12 @@ export interface BoardroomClient {
   listRooms(): Promise<RoomListResponse>;
   createRoom(input: Omit<CreateRoomRequest, "companyId">): Promise<RoomDetail>;
   getRoom(roomId: string): Promise<RoomDetail>;
-  updateRoom<T = unknown>(roomId: string, patch: JsonObject): Promise<T>;
-  addParticipant<T = unknown>(roomId: string, agentId: string): Promise<T>;
-  removeParticipant<T = unknown>(roomId: string, agentId: string): Promise<T>;
+  /** Change the title, topic and/or turn cap between Rounds; answers with the Room detail. */
+  updateRoom(roomId: string, patch: { title?: string; topic?: string; maxTotalTurns?: number }): Promise<RoomDetail>;
+  /** Add an agent between Rounds; answers with the Room detail. */
+  addParticipant(roomId: string, agentId: string): Promise<RoomDetail>;
+  /** Remove an active Participant between Rounds; answers with the Room detail. */
+  removeParticipant(roomId: string, agentId: string): Promise<RoomDetail>;
   /** One page of the transcript, oldest first: the latest `limit`, or those just before / after a Message id. */
   listMessages(roomId: string, page?: { limit?: number; before?: string; after?: string }): Promise<MessageListResponse>;
   sendMessage(roomId: string, input: Omit<SendMessageRequest, "companyId">): Promise<SendMessageResponse>;
@@ -131,7 +132,8 @@ export interface BoardroomClient {
   pauseRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   resumeRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
   stopRound<T = unknown>(roomId: string, roundId: string): Promise<T>;
-  closeRoom<T = unknown>(roomId: string): Promise<T>;
+  /** Close the Room (no Round may be active); answers with the Room detail. */
+  closeRoom(roomId: string): Promise<RoomDetail>;
   /** Save the Decision record (an empty string clears it); answers with the Room detail. */
   updateDecision(roomId: string, body: Pick<UpdateDecisionRequest, "decisionMd">): Promise<RoomDetail>;
   createWork(roomId: string, body: Omit<CreateWorkRequest, "companyId">): Promise<CreateWorkResponse>;
