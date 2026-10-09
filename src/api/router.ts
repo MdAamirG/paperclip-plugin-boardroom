@@ -6,6 +6,7 @@ import { isUuid } from "./validation.js";
 import { listRoomMessages, sendMessage } from "./messages.js";
 import { updateDecision } from "./decision.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
+import { addParticipant, closeRoom, removeParticipantRoute, updateRoom } from "./room-edits.js";
 import { listRoomRounds } from "./rounds.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
 import { addWorkLink, createWork, removeWorkLink } from "./work.js";
@@ -18,6 +19,10 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
   "rooms.list": listRooms,
   "rooms.create": createRoom,
   "rooms.get": getRoomDetail,
+  "rooms.update": updateRoom,
+  "rooms.close": closeRoom,
+  "participants.add": addParticipant,
+  "participants.remove": removeParticipantRoute,
   "messages.list": listRoomMessages,
   "messages.send": sendMessage,
   "rounds.list": listRoomRounds,
