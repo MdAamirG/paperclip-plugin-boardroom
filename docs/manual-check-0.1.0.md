@@ -1,48 +1,59 @@
 # Manual check, 0.1.0
 
-Status: **not run**. Nothing below has been performed. Fill this in on a throwaway local Paperclip instance (current release, `local_trusted` mode, embedded database, scratch data directory and its own instance name), with the plugin installed from its local path, not on a working company.
+Status: **run on 2026-10-10 (local time), with failures recorded below.** Steps were driven through the plugin HTTP API with curl (`/api/plugins/mdaamirg.boardroom/api/...` as the local board user). UI items were checked in headless Chromium (Playwright) with screenshots, not in a person's own browser. The run was done by an AI agent on the user's instruction.
 
-- Paperclip version: _not run_
-- Plugin commit: _not run_
-- Adapters used (at least `claude_local` x2 and one other, for example `codex_local`): _not run_
+- Paperclip version: `2026.916.0+170.git.0f14d2612` (commit `0f14d261233c545aa6a8a38ec253c498a5130fff`, branch `boardroom-discussion-rooms`, clean), `local_trusted`, embedded Postgres, loopback port 3199, scratch `PAPERCLIP_HOME` outside the user's real data. Telemetry and the update check were switched off in the scratch config.
+- Plugin commit: `a33c195` (main), built with `pnpm build`, installed from its local path (`POST /api/plugins/install`, `isLocalPath`). Status `ready`.
+- Adapters used: `claude_local` x2 (Planner, Backend Engineer; model `claude-haiku-4-5`, ACP engine, the user's Claude subscription) and `gemini_local` (Reviewer). **The second adapter did not produce an answer**: the Gemini account was rate limited (`RATE_LIMIT_EXCEEDED`, the CLI retrying every 60 s, also with `gemini-2.5-flash` and `-flash-lite` called directly). So the "second adapter" criterion is **unmet**: `gemini_local` was started by a Turn (run `37f0bd1c-99f9-487b-af94-12fd3c2d6ba4`, 4.4 minutes without a reply, then cancelled) but never answered. `codex`, `cursor` and `opencode` are not installed.
+- Ids: company `d5144120-52dd-49cd-b6b9-b9e7db9dfd67` (prefix BOA), Room `f79fac7f-4699-4966-97ce-8b6639a85c88`.
 
-Record each step as passed or failed, with run ids. Name any failure as a follow-up.
+Important setup finding (follow-up F1): until a per-company plugin configuration row existed (`POST /api/plugins/:id/config` with `configJson: {}`), every host call made outside an HTTP request (live session event callbacks) was refused. The row was added after step 5 first failed. The repeat of step 5 and steps 6 to 13 ran with the row present. Steps 1 to 4 ran without it.
+
+Run ids are heartbeat run ids on the scratch instance.
 
 | # | Step | Status | Run ids and notes |
 | --- | --- | --- | --- |
-| 1 | Before install, no Boardroom entry. After install and enable, the sidebar entry appears; after disable it disappears and the routes return 404 or 503. | not run | |
-| 2 | Create a Room with two agents on `claude_local` and one on a second adapter, a project and a linked issue. | not run | |
-| 3 | Post a note: no run starts. | not run | |
-| 4 | Mention one agent: one run, a posted Message, cost shown on the Turn. The reply has no environment preamble. | not run | |
-| 5 | "Ask all": serial Turns; the second agent's reply can refer to the first. | not run | |
-| 6 | Pause and Resume during a Round; Stop during a Turn (fallback cancel through the board route). The run shows as cancelled in Paperclip and no further Turn starts. | not run | |
-| 7 | Pause an agent in Paperclip, then address it: the Turn is skipped with Paperclip's message. | not run | |
-| 8 | Restart the Paperclip server during a Turn: the Round settles and continues within about a minute, with no duplicate Message. | not run | |
-| 9 | Record a Decision; create follow-up work with a plan; link an existing issue; open the issue and see the "From Room" chip; the issue is in the issue list and the Room is not. | not run | |
-| 10 | Close the Room; a note is refused; follow-up work can still be created. | not run | |
-| 11 | Check the activity log for the Room's entries. | not run | |
-| 12 | A viewer account (if the instance mode has one) can read but not post. | not run | |
-| 13 | The agents' own permissions and budgets applied during Turns, and no agent created work or called Paperclip APIs during a Turn. | not run | |
+| 1 | Before install, no Boardroom entry. After install and enable, the sidebar entry appears; after disable it disappears and the routes return 404 or 503. | passed | Before install: no sidebar entry, `GET /api/plugins` = `[]`, plugin route 404 "Plugin not found". After install: "Boardroom" in the sidebar. After disable: entry gone, route 503 "Plugin is not ready (current status: disabled)". After enable: back. |
+| 2 | Create a Room with two agents on `claude_local` and one on a second adapter, a project and a linked issue. | passed (Room created); second adapter never answered | Room with Planner and Backend Engineer (`claude_local`) and Reviewer (`gemini_local`), project "MC Project", linked issue BOA-1; 201, three Participants, work link present. |
+| 3 | Post a note: no run starts. | passed | Note saved, `round: null`; heartbeat run count stayed 0. |
+| 4 | Mention one agent: one run, a posted Message, cost shown on the Turn. The reply has no environment preamble. | passed, with follow-up F1 | Run `f3040a96-812a-40d7-8284-2f3880b46831` (succeeded, about 12 s). One Turn, Message posted, Turn cost 10,815 in / 14,060 cached / 535 out, `subscriptionBilled: true`, 0 cents. The reply was two plain sentences, no preamble. The activity entry for the Turn and the session close failed in this path (F1). |
+| 5 | "Ask all": serial Turns; the second agent's reply can refer to the first. | **failed first, then passed with the config row** | First attempt (no config row), Round 3: Planner run `b64caf51-3373-4012-a06c-86831ff298d0` posted; Backend Engineer Turn `b90f9e31-f6d2-4597-ab94-32fc3d216568` was **skipped** `not_invokable` with host message "Plugin ... is not allowed to perform \"agents.sessions.create\": the worker referenced a missing, expired, or unknown invocation scope"; Round marked completed (F1, F2). Second attempt, Round 4, after the config row: Planner `3f211d2b-d534-4678-8fec-a2137ed4eab9` then Backend Engineer `4ad6aa59`, both posted, in order. Backend Engineer's reply began "@Planner: Agreed...", so it referred to the first reply. |
+| 6 | Pause and Resume during a Round; Stop during a Turn (fallback cancel through the board route). The run shows as cancelled in Paperclip and no further Turn starts. | passed | Pause: Round 5 (runs `4b66a1ed` then `6ce2f502`): paused during Turn 1, Turn 1 finished and posted, Turn 2 stayed queued for 30 s while paused; Resume started Turn 2, Round completed. Stop, driven from the real page (Stop, then "Stop Round" in the dialog): the page called `POST .../rounds/79d72c3a-8ab5-4156-ae9c-e619d8aab12f/stop` and then `POST /api/heartbeat-runs/830933e2-2fa5-4ed5-8d45-72562afee094/cancel`; the run is `cancelled` ("Cancelled by a board operator"), Turn failed "Run cancelled", next Turn skipped "the Round was stopped", no further run started. The stop response says `cancel: "fallback"`; worker log: "the host cannot cancel a session's run; Stop hands the run id to the page". The hung Gemini run `37f0bd1c` was also cancelled with the board route. |
+| 7 | Pause an agent in Paperclip, then address it: the Turn is skipped with Paperclip's message. | passed | Planner paused with `POST /api/agents/:id/pause`; Round 8 Turn `64495029-7ca1-4509-98aa-12953393d0a2` skipped, `not_invokable`, hostMessage "Agent is not invokable in its current state"; no run started. Agent resumed afterwards. |
+| 8 | Restart the Paperclip server during a Turn: the Round settles and continues within about a minute, with no duplicate Message. | passed, with follow-up F4 | Round 9 (Backend Engineer then Planner); Backend Engineer run `1849d142-0cc9-40ac-a6de-eece984d088c` was running a shell `sleep 40`. The server was killed with SIGKILL and restarted 3 s later. The host left the run `running` for about 5 minutes, then marked it `failed` / `process_lost` ("Process lost -- child pid 72298 is no longer running; retrying once"). The plugin settled the Turn as failed and started the Planner Turn (run `82c34b54-4d78-48d0-8401-e5154b51e0a3`) in the same second as the host's change. One Message from Planner, none duplicated. The host also started its own retry run `9b12a722` for Backend Engineer (F4). |
+| 9 | Record a Decision; create follow-up work with a plan; link an existing issue; open the issue and see the "From Room" chip; the issue is in the issue list and the Room is not. | passed | Decision recorded, and edited in the real editor. Follow-up BOA-2 created with a plan: `originKind` `plugin:mdaamirg.boardroom`, `originId` = Room id, `createdByUserId` and `responsibleUserId` `local-board`, `plan` document present with the text. BOA-3 linked with `POST /work-links`. Issue page BOA-2 shows the chip "From Room: Auth approach" (BOA-1, the linked issue, too). Issue list shows BOA-1 to BOA-3; no Room entry. |
+| 10 | Close the Room; a note is refused; follow-up work can still be created. | passed | Close: `status: closed`. Note: 409 `room_closed`. Follow-up BOA-4 created after close, 201. |
+| 11 | Check the activity log for the Room's entries. | partly failed | `GET /companies/:id/activity` shows `boardroom_room` entries with `actorType: "plugin"` and the acting user as `actingUserId: "local-board"` in the details (Room created, Participant added, Message posted, Round started/paused/resumed/stopped, Decision recorded, Work created/linked, Room closed). Turn and Round-completion entries written from the live-event path are missing for steps 4 and 5 (first attempt) (F1); after the config row they are written (with `actingUserId: null` by design). |
+| 12 | A viewer account (if the instance mode has one) can read but not post. | not verified (no viewer account in `local_trusted`; the only member is the owner `local-board`) | The role matrix is covered only by the automated tests. |
+| 13 | The agents' own permissions and budgets applied during Turns, and no agent created work or called Paperclip APIs during a Turn. | partly verified | No agent created work or called Paperclip APIs: the only agent-actor activity entries are environment lease acquire/release, and every issue (BOA-1 to BOA-4) was created by the board. Agent pause was respected (step 7). Budgets: **not verified** (subscription runs cost 0 cents, so no budget could trip). Permissions: the ACP runs used permission mode `approve-all` (the adapter default) and agents ran a shell command in steps 6 and 8; no restriction was tested. |
 
 ## Adapters that answered with their heartbeat routine instead of the question
 
-_not run_ (record the adapter and run id for each)
+None observed on `claude_local` (all answered Turns were direct answers). `gemini_local`: no answer at all (rate limited), so unknown.
 
 ## Host assumptions to confirm during the check
 
-These were assumed in the build from host source and the spec and are not verified on a running host. Record the result next to the step that exercises them.
-
-- [ ] (step 4, 5) The plugin receives `agent.run.finished|failed|cancelled` events for runs it started itself.
-- [ ] (step 4) Cost events are recorded on the run id that the session send returns, so cost shows on the Turn (not zeros).
-- [ ] (step 8) `heartbeat_runs.result_json.summary` is not truncated in a way that shortens a recovered reply.
-- [ ] (step 6) `POST /api/heartbeat-runs/:id/cancel` works as the board user, and the run shows as cancelled. Also note whether the host offers the session-run cancel.
-- [ ] (step 9) `actor.actorUserId` on task creation is honoured: open the created task and confirm creator, responsible user, origin and the `plan` document.
-- [ ] (step 9) The host renders the `toolbarButton` "From Room" chip on the issue page with the issue as `entityId`; check its placement.
-- [ ] (steps 2 to 10) Look and feel: light and dark themes, a narrow screen (single column below 64rem), transcript scroll-follow, mention list position, Turn marker placement and hints.
-- [ ] (step 9) The real Markdown editor in the Decision record: Edit, Cancel/Save layout, Ctrl+Enter.
-- [ ] (step 11) Activity entries are attributed to the plugin with the acting user in their details.
-- [ ] (step 1) In `local_trusted` mode the local board user has a company membership (otherwise the API answers 403 `not_a_company_member` until a host restart).
+- [x] (step 4, 5) The plugin receives `agent.run.finished|failed|cancelled` events for runs it started itself. **Held for `agent.run.failed`**: after the worker restart in step 8 the live session callback was gone, and the Turn was still settled in the same second as the host's `process_lost`. `agent.run.finished` was not isolated (the live `done` event settled first in steps 4 to 6).
+- [x] (step 4) Cost events are recorded on the run id that the session send returns, so cost shows on the Turn (not zeros). **Held**: tokens non-zero, subscription billed, 0 cents.
+- [x] (step 8) `heartbeat_runs.result_json.summary` is not truncated in a way that shortens a recovered reply. **Held for a 2,274-character reply** (summary length equals the posted Message length, run `994c452a-6106-4cdf-9b5a-215adcb7ff53`). Larger replies, and the recovery path for a succeeded run, were not tested.
+- [x] (step 6) `POST /api/heartbeat-runs/:id/cancel` works as the board user, and the run shows as cancelled. **Held.** The host does **not** offer the session-run cancel (`cancelRun is not available`), so the fallback is what runs.
+- [x] (step 9) `actor.actorUserId` on task creation is honoured. **Held**: creator, responsible user, origin kind and id, and the `plan` document all as expected.
+- [x] (step 9) The host renders the `toolbarButton` "From Room" chip on the issue page with the issue as `entityId`. **Held**: the chip sits under the title and project row, left aligned, above the description.
+- [ ] (steps 2 to 10) Look and feel. **Partly verified** in headless Chromium only: light and dark themes render correctly; at 420 px width the page is one column with no horizontal scroll. Not verified: transcript scroll-follow, mention list position, Turn marker placement while live (the live stream does not work on this host, F5). Skipped and failed Turn markers with their reasons and cost render as expected.
+- [x] (step 9) The real Markdown editor in the Decision record. **Held**: Edit opens the editor, Cancel left and Save right on one row, Ctrl+Enter saves.
+- [x] (step 11) Activity entries are attributed to the plugin with the acting user in their details. **Held** (`actorType: "plugin"`, `details.actingUserId`).
+- [x] (step 1) In `local_trusted` mode the local board user has a company membership. **Held, also for a company created with `POST /api/companies`** (role `owner`; no 403 and no restart needed). This differs from the README's "Access notes".
 
 ## Follow-ups
 
-_none recorded (check not run)_
+Severity: blocker, major, minor.
+
+- **F1 (blocker): host calls made from a live session event callback are refused, so a multi-Turn Round does not continue.** Cause found in host `server/src/services/plugin-worker-manager.ts` (`contextForWorkerMessage`): a worker call made outside a host invocation (the `onEvent` callback of `ctx.agents.sessions.send`, run by `handleSessionEvent`) is only admitted for a company that has a plugin configuration row (`proactiveCompanyScopes`). Boardroom has no settings, so no row exists. Effects without the row: the next Turn's `agents.sessions.create` fails and the Turn is recorded as skipped `not_invokable` (step 5 first attempt, Turn `b90f9e31-f6d2-4597-ab94-32fc3d216568`); `activity.log`, `agents.sessions.close` and `streams.emit` fail ("missing, expired, or unknown invocation scope"), so Turn and Round-completion activity entries are lost and sessions are not closed. Workaround that worked: save an empty per-company config (`POST /api/plugins/:id/config {companyId, configJson: {}}`). The plugin needs either to make these calls inside an invocation (for example settle from `ctx.events.on` handlers, whose invocation carries the company) or to document and automate the config row. The automated harness does not model this host gate.
+- **F2 (major): a Turn skipped for a plugin-side or host-scope error is reported as the agent not being invokable.** It is permanent, with no retry and a misleading host message.
+- **F3 (minor): `authorName` is null for the board user in message responses** (the page shows "You"). Already a known limit in the README.
+- **F4 (minor, host): the host auto-retries after `process_lost`.** It started its own run (`9b12a722`, `retryOfRunId` `1849d142`) for the agent outside any Turn; it spent tokens and its reply was not posted. This conflicts with the README's "no automatic retries". The host also needed about 5 minutes to declare the run lost after a hard kill, so "settles within about a minute" holds only after the host itself ends the run.
+- **F5 (major, host): the plugin stream bridge is not enabled in this Paperclip commit.** `GET /api/plugins/:id/bridge/stream/boardroom` returns 501 "Plugin stream bridge is not enabled" (`app.ts` does not pass `streamBus` to `pluginRoutes`). The page shows "Live updates are off ... Reload the page to reconnect" on every load and never updates by itself. The page should poll as a fallback when the stream is unavailable.
+- **F6 (minor): second adapter unproven.** `gemini_local` could not answer because of Gemini rate limits. Repeat with Gemini or `codex_local` before claiming support. Note that the host's `gemini_local` adapter wrote a symlink `~/.gemini/skills/paperclip` in the user's real home (host behaviour, not isolated by `PAPERCLIP_HOME`); it was left in place.
+- **F7 (minor): README "Known limits" and "Access notes" are out of date** after this check (the check has now been run; the local board membership claim does not hold for `POST /api/companies`).
+- **F8 (minor, cosmetic): unordered list lines render without bullets in the Decision editor view.**
+- Not verified: step 12 (viewer), the budget half of step 13, live-update behaviour (scroll-follow, mention list position), a working second adapter.
