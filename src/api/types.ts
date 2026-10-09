@@ -119,6 +119,8 @@ export interface SendMessageResponse {
   /** Always null until a Round can start (ticket 06). */
   round: Round | null;
   ignoredMentions: IgnoredMention[];
+}
+
 export interface UpdateDecisionRequest {
   companyId: string;
   /** The markdown; an empty or blank string clears the record. */
