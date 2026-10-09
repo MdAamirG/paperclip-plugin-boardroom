@@ -321,7 +321,7 @@ export function TranscriptRegion({ companyId, detail, refreshKey }: RegionProps)
                   >
                     <strong>{turnAgentLabel(item.marker.turn)}</strong>{" "}
                     <span>{MARKER_TEXT[item.marker.turn.outcome ?? ""] ?? "finished"}</span>
-                    {item.marker.turn.outcome === "failed" && item.marker.turn.hostMessage ? (
+                    {(item.marker.turn.outcome === "failed" || item.marker.turn.outcome === "skipped") && item.marker.turn.hostMessage ? (
                       <span className="br-small">{item.marker.turn.hostMessage}</span>
                     ) : null}
                   </p>

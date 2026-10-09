@@ -64,6 +64,7 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
 
   const [draft, setDraft] = useState("");
   const [picked, setPicked] = useState<PickedMention[]>([]);
+  const [askAll, setAskAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [ignored, setIgnored] = useState<IgnoredMention[] | null>(null);
@@ -101,6 +102,7 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
   useEffect(() => {
     setDraft("");
     setPicked([]);
+    setAskAll(false);
     setError(null);
     setIgnored(null);
     setTrigger(null);
@@ -143,17 +145,19 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
     const mentions = currentMentions(text);
     // The same text and mentions is a retry of the same send: it keeps its key, so a send that
     // was saved but whose answer was lost is not saved twice.
-    const signature = JSON.stringify([text, mentions]);
+    const everyone = askAll && canStartRound;
+    const signature = JSON.stringify([text, mentions, everyone]);
     if (!pending.current || pending.current.signature !== signature) pending.current = { key: newIdempotencyKey(), signature };
     sending.current = true;
     setBusy(true);
     setError(null);
     setIgnored(null);
     try {
-      const response = await client.sendMessage(roomId, { body: text, mentions, idempotencyKey: pending.current.key });
+      const response = await client.sendMessage(roomId, { body: text, mentions, ...(everyone ? { askAll: true } : {}), idempotencyKey: pending.current.key });
       pending.current = null;
       setDraft("");
       setPicked([]);
+      setAskAll(false);
       setTrigger(null);
       setIgnored(response.ignoredMentions);
       announceMessagePosted(roomId);
@@ -206,8 +210,11 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
 
   const tooLong = draft.trim().length > COMPOSER_BODY_MAX;
   const mentionedNames = picked.filter((m) => currentMentions(draft).includes(m.agentId)).map((m) => m.name);
-  const startsRound = mentionedNames.length > 0 && activeRound === null;
-  const blockedByRound = mentionedNames.length > 0 && activeRound !== null;
+  const addressing = mentionedNames.length > 0 || (askAll && canStartRound);
+  const startsRound = addressing && activeRound === null;
+  const blockedByRound = addressing && activeRound !== null;
+  const askAllNames = participants.map((p) => p.name);
+  const replyNames = askAll && canStartRound ? askAllNames : mentionedNames;
   const optionId = (index: number) => `${listId}-${index}`;
 
   return (
@@ -267,12 +274,17 @@ function ComposerForm({ companyId, detail, reloadRoom }: Pick<RegionProps, "comp
         ) : null}
       </div>
 
+      {canStartRound ? (
+        <label className="br-row br-small">
+          <input type="checkbox" checked={askAll} disabled={busy || detail.participants.length === 0} onChange={(event) => setAskAll(event.target.checked)} /> Ask all participants
+        </label>
+      ) : null}
       {canStartRound && !startsRound && !blockedByRound ? (
         <p className="br-muted br-small">Mention a Participant with @ to ask for their reply. That starts a Round.</p>
       ) : null}
       {startsRound ? (
         <p className="br-notice br-notice-warn" role="status">
-          Sending will start a Round: {mentionedNames.join(", ")} will reply, one after the other.
+          Sending will start a Round: {replyNames.join(", ")} will reply, one after the other.
         </p>
       ) : null}
       {blockedByRound ? (

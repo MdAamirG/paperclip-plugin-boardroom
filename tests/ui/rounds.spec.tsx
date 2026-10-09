@@ -168,3 +168,42 @@ describe("Composer: Round hints", () => {
     expect(box().value).toContain("@Ada");
   });
 });
+
+describe("Ask all and skipped Turns (ticket 07)", () => {
+  const renderComposer = (detail = detailFixture(), api = createMockApi().on("POST", MESSAGES, { message: messageFixture(), round: null, ignoredMentions: [] } satisfies SendMessageResponse)) => {
+    renderWithBoardroom(() => <ComposerRegion companyId={COMPANY_ID} detail={detail} refreshKey={0} reloadRoom={() => {}} />, { api });
+    return api;
+  };
+
+  it("sends askAll: true when the Owner ticks Ask all participants", async () => {
+    const api = renderComposer();
+    fireEvent.click(screen.getByLabelText("Ask all participants"));
+    fireEvent.change(screen.getByLabelText("Message (Markdown)"), { target: { value: "Everyone, thoughts?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(api.calls.some((c) => c.method === "POST")).toBe(true));
+    const post = api.calls.find((c) => c.method === "POST")!;
+    expect(JSON.stringify(post)).toContain('"askAll":true');
+  });
+
+  it("hides Ask all for operators", () => {
+    const base = detailFixture();
+    renderComposer(detailFixture({ permissions: { ...base.permissions, canControl: false } }));
+    expect(screen.queryByLabelText("Ask all participants")).not.toBeInTheDocument();
+  });
+
+  it("shows a skipped Turn's host message word for word in progress and in the transcript", async () => {
+    const turn = turnFixture({ status: "finished", outcome: "skipped", skipReason: "not_invokable", hostMessage: "Agent is over budget", finishedAt: "2026-10-01T09:02:00.000Z" });
+    renderWithBoardroom(() => <RoundProgressRegion companyId={COMPANY_ID} detail={detailFixture({ activeRound: roundFixture({ turns: [turn] }) })} refreshKey={0} reloadRoom={() => {}} />);
+    expect(screen.getByText("Agent is over budget")).toBeInTheDocument();
+    expect(screen.getByText("Skipped")).toBeInTheDocument();
+  });
+
+  it("shows the host message in the transcript marker", async () => {
+    const turn = turnFixture({ status: "finished", outcome: "skipped", skipReason: "not_invokable", hostMessage: "Agent is over budget", finishedAt: "2026-10-01T09:02:00.000Z" });
+    const api = createMockApi()
+      .on("GET", MESSAGES, { messages: [messageFixture({ createdAt: "2026-10-01T09:00:00.000Z" })], hasMore: false })
+      .on("GET", ROUNDS, { rounds: [roundFixture({ status: "completed", turns: [turn] })] });
+    renderWithBoardroom(() => <TranscriptRegion companyId={COMPANY_ID} detail={detailFixture()} refreshKey={0} reloadRoom={() => {}} />, { api });
+    expect(await screen.findByText("Agent is over budget")).toBeInTheDocument();
+  });
+});
