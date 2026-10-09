@@ -18,6 +18,7 @@ import {
   getRound,
   getTurn,
   insertMessage,
+  insertInitialParticipants,
   insertParticipant,
   insertRoom,
   insertRound,
@@ -25,7 +26,7 @@ import {
   insertWorkLink,
   listActiveParticipants,
   listMessages,
-  listRooms,
+  listRoomSummaries,
   listRounds,
   listTurns,
   listWorkLinks,
@@ -293,8 +294,8 @@ describe("room_participants", () => {
     expect(await insertParticipant(db, company.id, { roomId: room.id, agentId, addedByUserId: "u" })).toBeNull();
     await expect(
       h.sql(
-        `INSERT INTO ${NS}.room_participants (id, company_id, room_id, agent_id, added_by_user_id)
-         VALUES (gen_random_uuid(), $1, $2, $3, 'u')`,
+        `INSERT INTO ${NS}.room_participants (id, company_id, room_id, agent_id, added_by_user_id, position)
+         VALUES (gen_random_uuid(), $1, $2, $3, 'u', 99)`,
         [company.id, room.id, agentId],
       ),
     ).rejects.toThrow(/room_participants_one_active_uq/);
@@ -321,6 +322,60 @@ describe("room_participants", () => {
       company.agents[0]!.id,
       company.agents[2]!.id,
     ]);
+  });
+
+  it("orders by an explicit position, not by timestamps, and gives a re-added agent the next position", async () => {
+    const h = await start();
+    const company = await h.seedCompany({ agents: ["A", "B", "C", "D"] });
+    const db = h.ctx.db;
+    const [a, b, c, d] = company.agents.map((x) => x.id);
+    const room = await insertRoom(db, company.id, { title: "T", topic: "", ownerUserId: "u" });
+
+    // One statement: every row has the same added_at, yet the order is the order given.
+    expect(await insertInitialParticipants(db, company.id, { roomId: room.id, agentIds: [c!, a!, b!], addedByUserId: "u" })).toBe(3);
+    const stamps = await h.sql<{ n: number }>(`SELECT count(DISTINCT added_at)::int AS n FROM ${NS}.room_participants`);
+    expect(stamps[0]!.n).toBe(1);
+    let active = await listActiveParticipants(db, company.id, room.id);
+    expect(active.map((p) => [p.agentId, p.position])).toEqual([[c, 0], [a, 1], [b, 2]]);
+
+    // Removing keeps the row and its position; re-adding takes max + 1 (removed rows count).
+    await removeParticipant(db, company.id, room.id, c!);
+    const again = await insertParticipant(db, company.id, { roomId: room.id, agentId: c!, addedByUserId: "u" });
+    expect(again!.position).toBe(3);
+    const next = await insertParticipant(db, company.id, { roomId: room.id, agentId: d!, addedByUserId: "u" });
+    expect(next!.position).toBe(4);
+    active = await listActiveParticipants(db, company.id, room.id);
+    expect(active.map((p) => p.agentId)).toEqual([a, b, c, d]);
+    const all = await h.sql<{ position: number }>(`SELECT position FROM ${NS}.room_participants ORDER BY position`);
+    expect(all.map((r) => r.position)).toEqual([0, 1, 2, 3, 4]);
+
+    // A second active row is still refused, and the refused insert takes no position.
+    expect(await insertParticipant(db, company.id, { roomId: room.id, agentId: d!, addedByUserId: "u" })).toBeNull();
+    expect((await h.sql(`SELECT 1 FROM ${NS}.room_participants`)).length).toBe(5);
+  });
+
+  it("refuses a duplicate position in one Room and a negative position", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const db = h.ctx.db;
+    const room = await insertRoom(db, company.id, { title: "T", topic: "", ownerUserId: "u" });
+    const insert = (agentId: string, position: number) =>
+      h.sql(
+        `INSERT INTO ${NS}.room_participants (company_id, room_id, agent_id, added_by_user_id, position)
+         VALUES ($1, $2, $3, 'u', $4)`,
+        [company.id, room.id, agentId, position],
+      );
+    await insert(company.agents[0]!.id, 0);
+    await expect(insert(company.agents[1]!.id, 0)).rejects.toThrow(/room_participants_room_position_uq/);
+    await expect(insert(company.agents[1]!.id, -1)).rejects.toThrow(/room_participants_position_check/);
+    // A Room that already has Participants, or a repeated agent, fails the whole multi-row insert.
+    await expect(
+      insertInitialParticipants(db, company.id, { roomId: room.id, agentIds: [company.agents[1]!.id], addedByUserId: "u" }),
+    ).rejects.toThrow();
+    const room2 = await insertRoom(db, company.id, { title: "T2", topic: "", ownerUserId: "u" });
+    const dup = company.agents[2]!.id;
+    await expect(insertInitialParticipants(db, company.id, { roomId: room2.id, agentIds: [dup, dup], addedByUserId: "u" })).rejects.toThrow();
+    expect(await countActiveParticipants(db, company.id, room2.id)).toBe(0);
   });
 
   it("refuses a Participant row whose room belongs to another company", async () => {
@@ -685,7 +740,7 @@ describe("company scoping: a read with company A's id never returns company B's 
     const { db, a, graphA, graphB } = await twoCompanies();
     expect(await getRoom(db, a.id, graphB.room.id)).toBeNull();
     expect((await getRoom(db, a.id, graphA.room.id))?.id).toBe(graphA.room.id);
-    expect((await listRooms(db, a.id)).map((r) => r.id)).toEqual([graphA.room.id]);
+    expect((await listRoomSummaries(db, a.id)).map((r) => r.id)).toEqual([graphA.room.id]);
   });
 
   it("room_participants", async () => {

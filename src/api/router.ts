@@ -1,7 +1,8 @@
 import type { PluginApiRequestInput, PluginApiResponse, PluginContext } from "@paperclipai/plugin-sdk";
 import { resolveActor } from "./access.js";
 import type { RouteHandler } from "./context.js";
-import { ApiError } from "./errors.js";
+import { ApiError, badRequest } from "./errors.js";
+import { isUuid } from "./validation.js";
 import { createRoom, getRoomDetail, listRooms } from "./rooms.js";
 import { ROUTE_SPECS, type RouteKey } from "./route-table.js";
 
@@ -18,7 +19,7 @@ const HANDLERS: Partial<Record<RouteKey, RouteHandler>> = {
 const KNOWN_ROUTE_KEYS: ReadonlySet<string> = new Set(ROUTE_SPECS.map((spec) => spec.routeKey));
 
 /**
- * The worker's `onApiRequest`. Order: known route, then the actor and their role (agents and
+ * The worker's `onApiRequest`. Order: known route, a well-formed company id, then the actor and their role (agents and
  * non-members are refused on every route, built or not), then the handler. Every error becomes a
  * response with its own status, because a thrown error would reach the host as a 502.
  */
@@ -27,6 +28,8 @@ export async function handleApiRequest(ctx: PluginContext, input: PluginApiReque
     if (!KNOWN_ROUTE_KEYS.has(input.routeKey)) {
       return new ApiError(404, "route_not_found", `Unknown Boardroom route: ${input.routeKey}`).toResponse();
     }
+    // The host passes the company id to Postgres as a uuid; a malformed one would be a cast error.
+    if (!isUuid(input.companyId)) return badRequest("companyId must be a company id").toResponse();
     const actor = await resolveActor(ctx, input);
     const handler = HANDLERS[input.routeKey as RouteKey];
     if (!handler) {

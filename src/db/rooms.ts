@@ -69,16 +69,6 @@ export function getRoom(db: Db, companyId: string, roomId: string): Promise<Room
   return selectOne(db, `SELECT * FROM ${table(db, "rooms")} WHERE company_id = $1 AND id = $2`, [companyId, roomId], mapRoom);
 }
 
-/** The company's Rooms, most recently updated first. */
-export function listRooms(db: Db, companyId: string): Promise<Room[]> {
-  return selectMany(
-    db,
-    `SELECT * FROM ${table(db, "rooms")} WHERE company_id = $1 ORDER BY updated_at DESC, id`,
-    [companyId],
-    mapRoom,
-  );
-}
-
 export interface RoomSummary extends Room {
   /** Active Participants only. */
   participantCount: number;

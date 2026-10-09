@@ -21,10 +21,11 @@ export function requiredString(body: Record<string, unknown>, field: string, max
   return trimmed;
 }
 
-/** A string, or `null` when the field is absent or null. */
+/** A string, or `null` when the field is absent, null or blank (a cleared form field sends ""). */
 export function optionalId(body: Record<string, unknown>, field: string): string | null {
   const value = body[field];
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") throw badRequest(`"${field}" must be a string`, { field });
-  return value;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
 }

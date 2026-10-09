@@ -70,7 +70,7 @@ export async function buildRoomDetail(ctx: PluginContext, actor: Actor, room: Ro
 export const listRooms: RouteHandler = async ({ ctx, input, actor }) => {
   requireLevel(actor, "read");
   const rooms = await listRoomSummaries(ctx.db, input.companyId);
-  return ok<RoomListResponse>({ rooms, permissions: { role: actor.role, canPost: canPost(actor) } });
+  return ok<RoomListResponse>({ rooms });
 };
 
 export const getRoomDetail: RouteHandler = async ({ ctx, input, actor }) => {

@@ -32,6 +32,14 @@ async function start(): Promise<BoardroomHarness> {
   return harness;
 }
 
+/** A harness whose manifest also holds `access.members.write`, so a test can change roles. */
+async function startWithMemberWrites(): Promise<BoardroomHarness> {
+  harness = await createBoardroomHarness({
+    manifest: { ...defaultManifest, capabilities: [...defaultManifest.capabilities, "access.members.write"] },
+  });
+  return harness;
+}
+
 const AGENTS_9 = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"];
 
 function createBody(company: SeededCompany, extra: Record<string, unknown> = {}) {
@@ -385,6 +393,221 @@ describe("POST /rooms", () => {
     expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.room_participants")).toEqual([]);
     expect(h.activity).toEqual([]);
     expect(h.streamEvents).toEqual([]);
+  });
+});
+
+/** Make the host database refuse the statements `fails` matches, and record every statement. */
+function breakDb(h: BoardroomHarness, fails: (sql: string) => boolean) {
+  const real = h.ctx.db;
+  const executed: string[] = [];
+  h.ctx.db = {
+    namespace: real.namespace,
+    query: real.query.bind(real),
+    execute: async (sql, params) => {
+      executed.push(sql);
+      if (fails(sql)) throw new Error("Failed query: boom");
+      return real.execute(sql, params);
+    },
+  };
+  return { executed, restore: () => void (h.ctx.db = real) };
+}
+
+describe("POST /rooms failure windows", () => {
+  it("writes every Participant with one statement", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const spy = breakDb(h, () => false);
+    expect((await createRoom(h, company)).status).toBe(201);
+    spy.restore();
+    expect(spy.executed.filter((sql) => /INSERT INTO \S*room_participants/.test(sql))).toHaveLength(1);
+  });
+
+  it("rolls the Room back when the Participant insert fails, and reports 500", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const spy = breakDb(h, (sql) => /INSERT INTO \S*room_participants/.test(sql));
+    const response = await createRoom(h, company);
+    spy.restore();
+    expectError(response, 500, "internal_error");
+    expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.rooms")).toEqual([]);
+    expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.room_participants")).toEqual([]);
+    expect(spy.executed.some((sql) => /DELETE FROM \S*rooms/.test(sql))).toBe(true);
+    expect(h.activity).toEqual([]);
+    expect(h.streamEvents).toEqual([]);
+    expect(h.logs.filter((l) => l.level === "error").map((l) => l.message)).toEqual([
+      "Boardroom could not finish creating a Room",
+    ]);
+  });
+
+  it("logs a failed rollback loudly, still answers 500, and leaves the Room with no Participants", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const spy = breakDb(h, (sql) => /INSERT INTO \S*room_participants/.test(sql) || /DELETE FROM \S*rooms/.test(sql));
+    const response = await createRoom(h, company);
+    spy.restore();
+    expectError(response, 500, "internal_error");
+    const errors = h.logs.filter((l) => l.level === "error");
+    expect(errors.map((l) => l.message)).toEqual([
+      "Boardroom could not finish creating a Room",
+      "Boardroom could not roll back a half-built Room; it is left without Participants",
+    ]);
+    const orphans = await h.sql<{ id: string }>("SELECT id FROM plugin_boardroom_79f8e138fc.rooms");
+    expect(orphans).toHaveLength(1);
+    expect(errors[1]!.meta).toMatchObject({ roomId: orphans[0]!.id, companyId: company.id });
+    expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.room_participants")).toEqual([]);
+    expect(h.activity).toEqual([]);
+    expect(h.streamEvents).toEqual([]);
+  });
+
+  it("keeps the Room when only the audit write fails, and logs it", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    h.ctx.activity.log = async () => {
+      throw new Error("activity store down");
+    };
+    const response = await createRoom(h, company);
+    expect(response.status).toBe(201);
+    expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.rooms")).toHaveLength(1);
+    expect(h.streamEvents).toHaveLength(1);
+    expect(h.logs.filter((l) => l.message === "Boardroom could not write an activity entry").length).toBeGreaterThan(0);
+  });
+
+  it("answers 201 with name null when an agent name lookup fails after the commit", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const realGet = h.ctx.agents.get.bind(h.ctx.agents);
+    let calls = 0;
+    h.ctx.agents.get = async (agentId, companyId) => {
+      calls += 1;
+      // The first three calls are the create's own checks; the detail lookups after the commit fail for one agent.
+      if (calls > 3 && agentId === company.agents[1]!.id) throw new Error("agents service down");
+      return realGet(agentId, companyId);
+    };
+    const created = await createRoom(h, company);
+    expect(created.status).toBe(201);
+    expect(created.body.participants.map((p) => p.name)).toEqual(["CEO", null, "CFO"]);
+    expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.rooms")).toHaveLength(1);
+
+    const read = await h.request<RoomDetail>("GET", `/rooms/${created.body.room.id}`, { query: { companyId: company.id } });
+    expect(read.status).toBe(200);
+    expect(read.body.participants.map((p) => p.name)).toEqual(["CEO", null, "CFO"]);
+  });
+});
+
+describe("POST /rooms input handling", () => {
+  it("stores quotes, unicode and SQL metacharacters in the title and topic unchanged", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const title = `O'Brien said "hi"; DROP TABLE rooms; -- \\ $1 %_ \u{1F680} caf\u00E9 \u4E2D\u6587`;
+    const topic = `a'b"c;--/* x */ \n second line $$ \u{1F4A1}`;
+    const created = await createRoom(h, company, { title, topic });
+    expect(created.status).toBe(201);
+    expect(created.body.room.title).toBe(title);
+    expect(created.body.room.topic).toBe(topic);
+    const read = await h.request<RoomDetail>("GET", `/rooms/${created.body.room.id}`, { query: { companyId: company.id } });
+    expect(read.body.room).toMatchObject({ title, topic });
+    const list = await h.request<RoomListResponse>("GET", "/rooms", { query: { companyId: company.id } });
+    expect(list.body.rooms[0]!.title).toBe(title);
+    expect(await h.sql<{ title: string }>("SELECT title FROM plugin_boardroom_79f8e138fc.rooms")).toEqual([{ title }]);
+  });
+
+  it("treats an empty projectId or linkedIssueId as not given", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const created = await createRoom(h, company, { projectId: "", linkedIssueId: "" });
+    expect(created.status).toBe(201);
+    expect(created.body.room.projectId).toBeNull();
+    expect(created.body.workLinks).toEqual([]);
+    const blank = await createRoom(h, company, { projectId: "   ", linkedIssueId: " " });
+    expect(blank.status).toBe(201);
+    expect(blank.body.room.projectId).toBeNull();
+  });
+
+  it("lower-cases agent ids once: stored lower case, and a repeat in another case is a duplicate", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    const [first, second] = company.agents;
+    const created = await createRoom(h, company, { agentIds: [first!.id.toUpperCase(), second!.id] });
+    expect(created.status).toBe(201);
+    expect(created.body.participants.map((p) => p.agentId)).toEqual([first!.id, second!.id]);
+    expect(await h.sql<{ agent_id: string }>("SELECT agent_id FROM plugin_boardroom_79f8e138fc.room_participants ORDER BY position")).toEqual([
+      { agent_id: first!.id },
+      { agent_id: second!.id },
+    ]);
+    expectError(
+      await createRoom(h, company, { agentIds: [first!.id, first!.id.toUpperCase()] }),
+      422,
+      "duplicate_participant",
+    );
+  });
+
+  it("answers 400 invalid_request when the company id is not a uuid, before any other check", async () => {
+    const h = await start();
+    const company = await h.seedCompany();
+    for (const routeKey of ["rooms.list", "rooms.create", "rooms.get", "messages.send"]) {
+      const response = await callWorker(h, routeKey, {
+        companyId: "not-a-uuid",
+        userId: company.members.owner.userId,
+        params: { roomId: randomUUID() },
+        body: {},
+      });
+      expectError(response, 400, "invalid_request");
+    }
+    expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.rooms")).toEqual([]);
+  });
+});
+
+describe("company roles", () => {
+  it("treats a membership with no role as an operator: may post, controls only their own Rooms", async () => {
+    const h = await startWithMemberWrites();
+    const company = await h.seedCompany();
+    const member = company.members.operator;
+    await h.ctx.access.members.update(member.memberId, { membershipRole: null } as never, company.id);
+    const stored = (await h.ctx.access.members.list({ companyId: company.id })).find((m) => m.principalId === member.userId)!;
+    expect(stored.membershipRole).toBeNull();
+
+    const created = await callWorker(h, "rooms.create", { companyId: company.id, userId: member.userId, body: createBody(company) });
+    expect(created.status).toBe(201);
+    const mine = created.body as RoomDetail;
+    expect(mine.permissions).toEqual({ role: "operator", canPost: true, canControl: true });
+
+    const owned = (await createRoom(h, company, {}, "admin")).body.room;
+    const theirs = await callWorker(h, "rooms.get", { companyId: company.id, userId: member.userId, params: { roomId: owned.id } });
+    expect((theirs.body as RoomDetail).permissions).toEqual({ role: "operator", canPost: true, canControl: false });
+  });
+
+  it("treats an unknown role string as a viewer", async () => {
+    const h = await startWithMemberWrites();
+    const company = await h.seedCompany();
+    const member = company.members.operator;
+    await h.ctx.access.members.update(member.memberId, { membershipRole: "superuser" } as never, company.id);
+    const refused = await callWorker(h, "rooms.create", { companyId: company.id, userId: member.userId, body: createBody(company) });
+    expectError(refused, 403, "role_cannot_post");
+  });
+
+  it("takes control away from a Room Owner who was downgraded to viewer", async () => {
+    const h = await startWithMemberWrites();
+    const company = await h.seedCompany();
+    const operator = company.members.operator;
+    const room = (await createRoom(h, company)).body.room; // owned by the operator
+    const permissions = async () =>
+      (await callWorker(h, "rooms.get", { companyId: company.id, userId: operator.userId, params: { roomId: room.id } })).body as RoomDetail;
+    expect((await permissions()).permissions).toEqual({ role: "operator", canPost: true, canControl: true });
+    await h.ctx.access.members.update(operator.memberId, { membershipRole: "viewer" } as never, company.id);
+    const after = await permissions();
+    expect(after.room.ownerUserId).toBe(operator.userId);
+    expect(after.permissions).toEqual({ role: "viewer", canPost: false, canControl: false });
+  });
+
+  it("refuses the local board user with 403 when it has no active membership in the company", async () => {
+    const h = await startWithMemberWrites();
+    const company = await h.seedCompany();
+    // The host seeds this membership at startup only; a company created another way has none.
+    const board = (await h.ctx.access.members.list({ companyId: company.id })).find((m) => m.principalId === "local-board")!;
+    await h.ctx.access.members.update(board.id, { status: "suspended" } as never, company.id);
+    expectError(await h.request("GET", "/rooms", { query: { companyId: company.id } }), 403, "not_a_company_member");
+    expectError(await h.request("POST", "/rooms", { body: createBody(company) }), 403, "not_a_company_member");
+    expect(await h.sql("SELECT 1 FROM plugin_boardroom_79f8e138fc.rooms")).toEqual([]);
   });
 });
 

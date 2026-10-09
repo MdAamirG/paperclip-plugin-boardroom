@@ -21,7 +21,9 @@ export interface Actor {
  *   defence in depth).
  * - A caller with no active membership is refused. The local board user has an owner membership
  *   in every company, so local mode needs no special case.
- * - A membership with a missing or unknown role is treated as a viewer (read only).
+ * - A membership with no role (null) is treated as an operator: the host gives such a member
+ *   normal access, so they may post, and control only a Room they own. A role string this plugin
+ *   does not know is treated as a viewer (read only), the safe default.
  */
 export async function resolveActor(ctx: PluginContext, input: PluginApiRequestInput): Promise<Actor> {
   if (input.actor.actorType !== "user") {
@@ -34,9 +36,13 @@ export async function resolveActor(ctx: PluginContext, input: PluginApiRequestIn
     (m) => m.companyId === input.companyId && m.principalType === "user" && m.principalId === userId && m.status === "active",
   );
   if (!member) throw forbidden("not_a_company_member", "You are not an active member of this company");
-  const role: CompanyRole =
-    member.membershipRole && KNOWN_ROLES.includes(member.membershipRole) ? (member.membershipRole as CompanyRole) : "viewer";
+  const role = roleOf(member.membershipRole);
   return { userId, companyId: input.companyId, role };
+}
+
+function roleOf(membershipRole: string | null | undefined): CompanyRole {
+  if (membershipRole === null || membershipRole === undefined) return "operator";
+  return KNOWN_ROLES.includes(membershipRole) ? (membershipRole as CompanyRole) : "viewer";
 }
 
 /** `post` level: any non-viewer. */

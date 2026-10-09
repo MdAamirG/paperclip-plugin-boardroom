@@ -51,10 +51,16 @@ CREATE TABLE plugin_boardroom_79f8e138fc.room_participants (
   room_id uuid NOT NULL,
   agent_id uuid NOT NULL,
   added_by_user_id text NOT NULL,
+  -- Join order, counted from 0 within the Room. Order by this column, never by added_at: rows
+  -- written by one statement share a timestamp. A removed row keeps its position, so a re-added
+  -- agent takes the next free one (largest position in the Room, plus one).
+  position integer NOT NULL,
   added_at timestamptz NOT NULL DEFAULT now(),
   removed_at timestamptz,
   CONSTRAINT room_participants_room_fk FOREIGN KEY (company_id, room_id)
-    REFERENCES plugin_boardroom_79f8e138fc.rooms (company_id, id) ON DELETE CASCADE
+    REFERENCES plugin_boardroom_79f8e138fc.rooms (company_id, id) ON DELETE CASCADE,
+  CONSTRAINT room_participants_position_check CHECK (position >= 0),
+  CONSTRAINT room_participants_room_position_uq UNIQUE (room_id, position)
 );
 
 -- One active row per room and agent. Removal is soft (removed_at), so a re-added agent gets a new row.
@@ -63,7 +69,7 @@ CREATE UNIQUE INDEX room_participants_one_active_uq
   WHERE removed_at IS NULL;
 
 CREATE INDEX room_participants_company_room_idx
-  ON plugin_boardroom_79f8e138fc.room_participants (company_id, room_id, added_at);
+  ON plugin_boardroom_79f8e138fc.room_participants (company_id, room_id, position);
 
 CREATE TABLE plugin_boardroom_79f8e138fc.room_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
