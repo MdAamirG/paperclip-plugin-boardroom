@@ -66,6 +66,7 @@ Severity: blocker, major, minor.
   **Status: open (needs a working second adapter; not a plugin change). README says only `claude_local` is confirmed.**
   **Re-check 2026-10-10: still open.** `gemini_local` run `84d62ffc-8668-4746-b363-b81dca01c679` produced no output in 5 minutes and was cancelled with the board route. In ACP mode the CLI showed no error, so the rate limit is likely but not proven. The cancelled Turn settled as `failed` "Run cancelled". The Gemini CLI again wrote to the user's real `~/.gemini`: `projects.json`, `history/<agent id>/`, and `tmp/<agent id>/chats/` (two session files). The cancel left an orphaned `gemini --acp` process (parent pid 1), which was killed by hand.
   **Check 2026-10-10: F6 still open: Gemini quota unavailable at 14:09 local time (08:39 UTC).** A one-line probe before any server was started (`gemini --skip-trust -p "Reply with the single word OK"`, Gemini CLI 0.61.0, default model) failed with `Attempt 1 failed: RATE_LIMIT_EXCEEDED` / `Suggested retry after 60s.. Retrying after 71565ms...` and was killed after about 2 minutes with no answer, so no Paperclip instance was started. The Gemini CLI wrote to the user's real `~/.gemini` again (`projects.json`, `history/scratchpad/`, `tmp/scratchpad/`, one chat session file).
+  **Second adapter check 2026-10-10, 14:33 local time (09:03 UTC): F6 still open. No second adapter is usable on this machine.** Gemini is still rate limited (two attempts, both `RATE_LIMIT_EXCEEDED`), Grok is installed but its login has expired, and no other adapter's CLI is installed. See "Second adapter check" below. Needs one of: Gemini quota back, `grok login`, or another adapter CLI installed and logged in.
 - **F7 (minor): README "Known limits" and "Access notes" are out of date** after this check (the check has now been run; the local board membership claim does not hold for `POST /api/companies`).
   **Status: fixed in branch (README known limits and access notes rewritten after this check).**
 - **F8 (minor, cosmetic): unordered list lines render without bullets in the Decision editor view.**
@@ -104,3 +105,38 @@ Run on 2026-10-10, 12:58 to 13:08 local time, by an AI agent on the user's instr
 | 4 | Mention one agent (single Turn), no page open | passed | Round 3 `f9574f93-f490-4bb2-83f6-e6f82f88a217` in "Queue choice", Turn `0a4346ac-5f74-4f8e-aed9-c69f6dee2b4a` (Planner, run `c3e042cc-7822-4ece-8a29-0cd296d39920`). The run ended at 07:37:39.342Z, the Message was saved at .350Z, "Turn posted" was written at .369Z, and "Round completed" at .379Z. The last sweep before that was at 07:37:24Z. The session was closed (0 `agent_task_sessions` rows). |
 
 Result: F1 and F9 are confirmed fixed on a real host. In a company without a config row and with no page open, each posted Turn is finished by the run event handler within about 40 ms of the run ending, and the next Turn or the Round's completion follows at once. Activity entries are written exactly once and sessions are closed. Stop with the page open works through the fallback cancel. The Stop window before a run id exists was not reproduced on the page (about 20 ms wide); only its neighbours were seen: before the session (`none`, Turn skipped, no run) and after the run id (`fallback` with the id). At the end, the server, its embedded Postgres, every agent process started by the check, and headless Chromium were stopped, and port 3199 was free. The host repo stayed clean. Outside the scratch directory, the Claude CLI used by `claude_local` wrote its session transcripts in the user's real `~/.claude/projects/`, two directories named after the scratch agent workspaces (`...-recheck2-home-instances-default-workspaces-<agent id>`). This is host and adapter behaviour, like the Gemini note in F6, and the directories were left in place.
+
+## Second adapter check
+
+Run on 2026-10-10, 14:31 to 14:36 local time (IST; 09:01 to 09:06 UTC), by an AI agent on the user's instruction. Goal: prove F6 with at least one adapter besides `claude_local` (items: 1 mention one agent alone, 2 "Ask all" with the second adapter paired with a `claude_local` agent, 3 cancel a hung run with no orphaned provider process). Plugin: branch `recheck-f6-second-adapter` at `db4b72b`. Host: `~/Documents/paperclip`, commit `0f14d2612` (clean). Rule for the check: no new CLI installs, no logins, no account changes.
+
+**Result: no second adapter was usable, so items 1 to 3 were not run and no Paperclip instance was started. F6 stays open.**
+
+Gemini probe (`gemini_local`): Gemini CLI 0.61.0, default model, run as `gemini --skip-trust -p "Reply with the single word OK"` in a scratch directory under a 75 s kill timer. It started at 14:33:15 local time (09:03:15 UTC). It failed twice with no answer:
+
+```
+Attempt 1 failed: RATE_LIMIT_EXCEEDED
+Suggested retry after 60s.. Retrying after 68318ms...
+Attempt 2 failed: RATE_LIMIT_EXCEEDED
+Suggested retry after 60s.. Retrying after 71828ms...
+```
+
+The retry after the suggested 60 s also failed, so this is probably not only a per-minute limit. The quota was unavailable at 14:09 and at 14:33 local time. Killing the `gemini` launcher with `kill -9` did not stop the CLI: it re-execs itself as a child `node --max-old-space-size=8192 .../gemini` process. The child was reparented to pid 1 and had to be killed separately. Retry the probe only after a longer wait, and kill the whole process group.
+
+Adapters checked:
+
+| Adapter | CLI it runs | State on this machine |
+| --- | --- | --- |
+| `gemini_local` | `gemini` | Installed (`/opt/homebrew/bin/gemini`, 0.61.0), logged in, **rate limited** (above). |
+| `grok_local` | `grok` | Installed (`~/.grok/bin/grok`, 1.0.44), **not logged in**. The stored xAI session expired on 2026-09-29, and the refresh was rejected (`invalid_grant`, "Invalid or unknown refresh token"). `grok models` says "You are not authenticated". Login: `grok login`. Note: running `grok models` made the Grok CLI delete its own dead `~/.grok/auth.json` ("cleared credentials after permanent refresh failure"). It was already unusable. |
+| `cursor_local` | `agent` (Cursor Agent CLI) | Not installed. `Cursor.app` ships only the IDE launchers (`cursor`, `code`). On this machine `agent` on `PATH` resolves to Grok's binary (`~/.grok/bin/agent`), so a `cursor_local` agent with the default command would start Grok, not Cursor. Install the Cursor Agent CLI, then log in with `agent login`. |
+| `codex_local` | `codex` | Not installed (no binary, no `~/.codex`). |
+| `opencode_local` | `opencode` | Not installed (`~/.config/opencode` is empty and `~/.local/share/opencode` has only logs). |
+| `pi_local` | `pi` | Not installed (`~/.pi` holds only skills). |
+| `kimi_local` | `kimi` | Not installed. |
+| `hermes` | `hermes` | Not installed. |
+| `cursor_cloud`, `openclaw_gateway`, `hermes_gateway` | remote services | Not configured (no `CURSOR_API_KEY` or gateway set up). Out of scope for a local check. |
+
+`copilot` is on `PATH`, but the host has no Copilot adapter.
+
+Files changed outside the scratch directory: `~/.gemini` (`projects.json`, `history/gemprobe/`, `tmp/gemprobe/` with one chat session file). `~/.grok` (`auth.json` deleted by the Grok CLI as described above, plus `auth.json.lock`, `logs/unified.jsonl`, `sessions/session_search.sqlite` and the bundled `docs/` refreshed). No Paperclip server was started, and no `gemini` or `grok` process was left running.
