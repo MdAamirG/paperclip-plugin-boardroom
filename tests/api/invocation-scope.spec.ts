@@ -11,7 +11,9 @@ import type { RoomDetail, RoundListResponse, SendMessageResponse } from "../../s
 import { ROUND_SWEEP_JOB_KEY } from "../../src/constants.js";
 import { getRound, listTurns } from "../../src/db/index.js";
 import { table } from "../../src/db/sql.js";
+import { REPLY_LINK_WAIT_MS, SETTLEMENT_WAIT_MS, handleRunEvent } from "../../src/engine/recovery.js";
 import { createBoardroomHarness, type BoardroomHarness } from "../support/harness.js";
+import { runInInvocation } from "../support/host/invocation.js";
 
 let harness: BoardroomHarness | undefined;
 
@@ -125,14 +127,17 @@ describe("a Round in a company without a plugin configuration row (F1)", () => {
     live(s, first!, "One.");
     await settled();
     const messageId = (await turnsOf(s, roundId))[0]!.messageId!;
-    // The gap between settling the Turn and linking its Message, as a concurrent finisher sees it.
-    await s.h.ctx.db.execute(`UPDATE ${table(s.h.ctx.db, "turns")} SET message_id = NULL WHERE company_id = $1 AND id = $2`, [s.company.id, first!.id]);
-    await runFinished(s, first!.runId!, first!.agentId);
+    // The gap between settling the Turn and linking its Message, as a finisher with no settlement of its own
+    // in flight sees it (another worker process saving the reply).
+    await setMessageLink(s, first!.id, null);
+    const delivered = runFinished(s, first!.runId!, first!.agentId);
+    await settled();
     expect((await turnsOf(s, roundId)).map((t) => t.status)).toEqual(["finished", "queued"]);
     expect(activityMessages(s)).not.toContain("Turn posted");
 
-    await s.h.ctx.db.execute(`UPDATE ${table(s.h.ctx.db, "turns")} SET message_id = $3 WHERE company_id = $1 AND id = $2`, [s.company.id, first!.id, messageId]);
-    await runFinished(s, first!.runId!, first!.agentId);
+    // The run event handler waits (bounded) for the link, then finishes the Turn inside its invocation.
+    await setMessageLink(s, first!.id, messageId);
+    await delivered;
     expect((await turnsOf(s, roundId)).map((t) => t.status)).toEqual(["finished", "running"]);
     expect(s.h.activity.find((entry) => entry.message === "Turn posted")?.metadata).toMatchObject({ messageId });
   });
@@ -184,6 +189,136 @@ describe("a Round in a company without a plugin configuration row (F1)", () => {
     live(s, first!, "One.");
     await settled();
     expect((await turnsOf(s, roundId)).map((t) => t.status)).toEqual(["finished", "running"]);
+  });
+});
+
+/**
+ * Hold the first `ctx.db` call whose SQL matches `pattern` until `release()`. `reached` resolves when that
+ * call arrives. Models the host round trips a settlement makes, so another signal can arrive in between.
+ */
+function holdDbCall(s: Setup, kind: "query" | "execute", pattern: RegExp) {
+  const db = s.h.ctx.db;
+  const original = db[kind].bind(db) as (sql: string, params?: unknown[]) => Promise<unknown>;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reach!: () => void;
+  const reached = new Promise<void>((resolve) => (reach = resolve));
+  let held = false;
+  (db as unknown as Record<string, unknown>)[kind] = async (sql: string, params?: unknown[]) => {
+    if (!held && pattern.test(sql)) {
+      held = true;
+      reach();
+      await gate;
+    }
+    return original(sql, params);
+  };
+  return { reached, release };
+}
+
+/** The live settlement's `setTurnMessage`. */
+const REPLY_LINK = /SET message_id = \$3/;
+
+async function setMessageLink(s: Setup, turnId: string, messageId: string | null) {
+  await s.h.ctx.db.execute(`UPDATE ${table(s.h.ctx.db, "turns")} SET message_id = $3::uuid WHERE company_id = $1 AND id = $2`, [
+    s.company.id,
+    turnId,
+    messageId,
+  ]);
+}
+
+describe("a run event that arrives while the live settlement is still saving the reply (F9)", () => {
+  it("waits for the live settlement, then finishes the Turn and starts Turn 2 inside its invocation", async () => {
+    const s = await setup();
+    const roundId = await askAll(s);
+    const [first] = await turnsOf(s, roundId);
+
+    // The host sends the live `done` first: the Turn is finished and host_pending, its Message is being linked.
+    const link = holdDbCall(s, "execute", REPLY_LINK);
+    live(s, first!, "Raise it by 5 percent.");
+    await link.reached;
+    expect((await turnsOf(s, roundId))[0]).toMatchObject({ status: "finished", outcome: "posted", hostPending: true, messageId: null });
+
+    // Then `agent.run.finished`, delivered inside an invocation for the company, while the reply is still saving.
+    const delivered = runFinished(s, first!.runId!, first!.agentId);
+    await settled();
+    link.release();
+    await delivered;
+
+    const turns = await turnsOf(s, roundId);
+    expect(turns.map((t) => t.status)).toEqual(["finished", "running"]);
+    expect(turns[0]).toMatchObject({ outcome: "posted", hostPending: false });
+    expect(turns[0]!.messageId).not.toBeNull();
+    expect(s.h.sessionSends).toHaveLength(2);
+    expect(s.h.activity.filter((entry) => entry.message === "Turn posted")).toHaveLength(1);
+    expect(s.h.activity.find((entry) => entry.message === "Turn posted")?.metadata).toMatchObject({ messageId: turns[0]!.messageId });
+  });
+
+  it("completes a whole Round with no page open when every run event races its live settlement", async () => {
+    const s = await setup();
+    const roundId = await askAll(s);
+    for (const text of ["One.", "Two."]) {
+      const turn = (await turnsOf(s, roundId)).find((t) => t.status === "running")!;
+      const link = holdDbCall(s, "execute", REPLY_LINK);
+      live(s, turn, text);
+      await link.reached;
+      const delivered = runFinished(s, turn.runId!, turn.agentId);
+      await settled();
+      link.release();
+      await delivered;
+    }
+    expect((await getRound(s.h.ctx.db, s.company.id, roundId))!.status).toBe("completed");
+    expect(activityMessages(s).filter((m) => m === "Turn posted")).toHaveLength(2);
+    expect(activityMessages(s)).toContain("Round completed");
+  });
+
+  it("finishes the Turn when the live event wins the settle-once claim while the run event handler is settling", async () => {
+    const s = await setup();
+    const roundId = await askAll(s);
+    const [first] = await turnsOf(s, roundId);
+
+    // The run event handler reads the Turn as running and goes to read the run; the live `done` lands meanwhile.
+    const snapshot = holdDbCall(s, "query", /heartbeat_runs/);
+    const delivered = runFinished(s, first!.runId!, first!.agentId);
+    await snapshot.reached;
+    const link = holdDbCall(s, "execute", REPLY_LINK);
+    live(s, first!, "Raise it by 5 percent.");
+    await link.reached;
+    snapshot.release(); // The handler's own settle now loses the claim.
+    await settled();
+    link.release();
+    await delivered;
+
+    const turns = await turnsOf(s, roundId);
+    expect(turns.map((t) => t.status)).toEqual(["finished", "running"]);
+    expect(turns[0]).toMatchObject({ outcome: "posted", hostPending: false });
+    expect(activityMessages(s).filter((m) => m === "Turn posted")).toHaveLength(1);
+  });
+
+  it("gives up after a bounded wait when the reply is never linked (the worker died saving it) and changes nothing", async () => {
+    const s = await setup();
+    const roundId = await askAll(s);
+    const [first] = await turnsOf(s, roundId);
+    live(s, first!, "One.");
+    await settled();
+    await setMessageLink(s, first!.id, null);
+
+    const started = Date.now();
+    await runInInvocation(s.company.id, () =>
+      handleRunEvent(
+        s.h.ctx,
+        { eventId: randomUUID(), eventType: "agent.run.finished", companyId: s.company.id, occurredAt: new Date().toISOString(), entityId: first!.runId!, payload: { runId: first!.runId! } },
+        { replyLinkWaitMs: 200 },
+      ),
+    );
+    expect(Date.now() - started).toBeGreaterThanOrEqual(200);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect((await turnsOf(s, roundId)).map((t) => t.status)).toEqual(["finished", "queued"]);
+    expect((await turnsOf(s, roundId))[0]).toMatchObject({ hostPending: true });
+    expect(activityMessages(s)).not.toContain("Turn posted");
+  });
+
+  it("keeps the run event handler's wait well inside the host's 15-minute event invocation", () => {
+    expect(SETTLEMENT_WAIT_MS + REPLY_LINK_WAIT_MS).toBeLessThan(15 * 60 * 1000);
   });
 });
 

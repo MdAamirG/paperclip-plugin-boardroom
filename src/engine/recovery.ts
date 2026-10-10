@@ -9,6 +9,7 @@ import {
   getMessageIdForTurn,
   getRound,
   getRunSnapshot,
+  getTurn,
   insertMessage,
   isRunTerminal,
   listCompaniesWithUnsettledRows,
@@ -19,7 +20,7 @@ import {
   type RunSnapshot,
   type Turn,
 } from "../db/index.js";
-import { finishPendingHostWork, settleTurn, type TurnSettlement } from "./rounds.js";
+import { finishPendingHostWork, settlementsInFlight, settleTurn, type TurnSettlement } from "./rounds.js";
 
 /** A `running` Turn with no run id after this long never reached the host (the worker died mid-start): it is failed. */
 export const STALE_DISPATCH_SECONDS = 300;
@@ -56,33 +57,75 @@ export function registerRecovery(ctx: PluginContext): void {
 }
 
 /**
+ * How long a run event handler waits for a live settlement of the same Turn, running in this worker,
+ * to finish saving the reply. The host keeps an event's invocation for 15 minutes (it delivers
+ * `onEvent` as a notification whose scope expires after `MAX_RPC_TIMEOUT_MS`), so this stays well inside it.
+ */
+export const SETTLEMENT_WAIT_MS = 60_000;
+/** Then, how long it polls for a `posted` Turn's Message link that no settlement in this worker is saving. */
+export const REPLY_LINK_WAIT_MS = 10_000;
+const REPLY_LINK_POLL_MS = 100;
+
+/** Wait limits for `handleRunEvent` (tests shorten them). */
+export interface RunEventWaits {
+  settlementWaitMs?: number;
+  replyLinkWaitMs?: number;
+}
+
+/**
  * A platform run event: find the Turn by run id and company, then settle it. Keyed by run id only;
  * an unknown run or a run of another company changes nothing. The reply of a finished run is read
  * from `heartbeat_runs` (the live session event may have been lost).
+ *
+ * This handler runs inside an invocation for the company, which the live session callback does not,
+ * so it also does the host part the live settlement could not (activity entry, session close, next
+ * Turn). The host sends the live `done` just before `agent.run.finished`, so the live settlement is
+ * usually still saving the reply when this runs (F9): wait for it first, bounded by `waits`.
  */
-export async function handleRunEvent(ctx: PluginContext, event: PluginEvent): Promise<void> {
+export async function handleRunEvent(ctx: PluginContext, event: PluginEvent, waits: RunEventWaits = {}): Promise<void> {
   const payload = (event.payload ?? {}) as { runId?: unknown; status?: unknown; error?: unknown };
   const runId = isUuid(payload.runId) ? payload.runId : isUuid(event.entityId) ? event.entityId : null;
   if (!runId || !event.companyId) return;
   const turn = await findTurnByRunId(ctx.db, event.companyId, runId);
   if (!turn) return;
-  if (turn.status !== "running") {
-    // Settled already (the live event wins). This handler runs inside an invocation for the company, which
-    // the live event callback did not: finish the host part (activity entry, session close, next Turn).
-    await finishPendingHostWork(ctx, event.companyId);
-    return;
+  if (turn.status === "running") {
+    let settlement: TurnSettlement;
+    if (event.eventType === "agent.run.finished") {
+      const run = await getRunSnapshot(ctx.db, event.companyId, runId);
+      settlement = settlementForRun({ status: "succeeded", summary: run?.summary ?? null, error: null }, runId);
+    } else {
+      const error = typeof payload.error === "string" && payload.error !== "" ? payload.error : null;
+      settlement = { outcome: "failed", runId, hostMessage: error };
+    }
+    // Won: this handler saved the reply and did the host part itself. Lost: the live event won a moment ago.
+    if (await settleTurn(ctx, event.companyId, turn.id, settlement)) {
+      await finishPendingHostWork(ctx, event.companyId);
+      return;
+    }
   }
-
-  let settlement: TurnSettlement;
-  if (event.eventType === "agent.run.finished") {
-    const run = await getRunSnapshot(ctx.db, event.companyId, runId);
-    settlement = settlementForRun({ status: "succeeded", summary: run?.summary ?? null, error: null }, runId);
-  } else {
-    const error = typeof payload.error === "string" && payload.error !== "" ? payload.error : null;
-    settlement = { outcome: "failed", runId, hostMessage: error };
-  }
-  await settleTurn(ctx, event.companyId, turn.id, settlement);
+  await waitForSettlement(ctx, event.companyId, turn.id, waits);
   await finishPendingHostWork(ctx, event.companyId);
+}
+
+/**
+ * Wait until the Turn's settlement has saved its reply: first for any settlement of it running in this
+ * worker, then, while the Turn is `posted` with no Message linked, poll the database (a settlement this
+ * worker cannot see). Both bounded; after that the caller goes on, and a Turn still waiting for its link
+ * is left to a later signal (the sweep repairs a reply that was never linked).
+ */
+async function waitForSettlement(ctx: PluginContext, companyId: string, turnId: string, waits: RunEventWaits): Promise<void> {
+  await settlementsInFlight(turnId, waits.settlementWaitMs ?? SETTLEMENT_WAIT_MS);
+  const deadline = Date.now() + (waits.replyLinkWaitMs ?? REPLY_LINK_WAIT_MS);
+  for (;;) {
+    const turn = await getTurn(ctx.db, companyId, turnId);
+    if (!turn || !(turn.status === "finished" && turn.outcome === "posted" && !turn.messageId)) return;
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      ctx.logger.warn("Boardroom gave up waiting for a reply to be linked", { turnId });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(REPLY_LINK_POLL_MS, left)));
+  }
 }
 
 /**
