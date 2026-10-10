@@ -80,6 +80,43 @@ async function reply(s: Setup, roundId: string, index: number, message: string |
   });
 }
 
+/** The agent replies saved in the Room. */
+async function agentMessageCount(s: Setup): Promise<number> {
+  const rows = await s.h.ctx.db.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM ${table(s.h.ctx.db, "room_messages")} WHERE company_id = $1 AND author_kind = 'agent'`,
+    [s.company.id],
+  );
+  return rows[0]!.n;
+}
+
+/** Hold every `sendMessage` until `release()`; `started` turns true once a send is waiting. */
+function gateSends(s: Setup) {
+  const sessions = s.h.ctx.agents.sessions;
+  const sendMessage = sessions.sendMessage.bind(sessions);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const state = { started: false, release: () => release() };
+  sessions.sendMessage = async (sessionId, companyId, opts) => {
+    state.started = true;
+    await gate;
+    return sendMessage(sessionId, companyId, opts);
+  };
+  return state;
+}
+
+/** Start a one-agent Round without waiting for the send request (it may be held by `gateSends`). */
+const sendOne = (s: Setup) =>
+  s.h.request<SendMessageResponse>("POST", `/rooms/${s.room.id}/messages`, {
+    body: { companyId: s.company.id, idempotencyKey: randomUUID(), body: "thoughts?", mentions: [s.company.agents[0]!.id] },
+    actor: s.owner,
+  });
+
+/** The host cancelled the run: its cancelled event arrives (inside an invocation, so the Turn finalizes). */
+const runCancelled = (s: Setup, index = 0) => {
+  const run = s.h.sessionSends[index]!;
+  return s.h.sdk.emit("agent.run.cancelled", { runId: run.runId, agentId: run.agentId, status: "cancelled", error: "Cancelled" }, { companyId: s.company.id, entityId: run.runId! });
+};
+
 /** Let any pending worker work (a stray dispatch) show itself. */
 const settleTicks = () => new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -245,7 +282,7 @@ describe("Stop", () => {
     expect(await statusOf(s, roundId)).toBe("stopped");
   });
 
-  it("cancels a run whose send was in flight when Stop landed", async () => {
+  it("cancels a run whose send was in flight when Stop landed, and the Turn settles once with no reply", async () => {
     const s = await setup();
     // How many runs existed at each cancel: Stop's own cancel comes before the send started one.
     const runsAtCancel: number[] = [];
@@ -253,30 +290,73 @@ describe("Stop", () => {
       runsAtCancel.push(s.h.sessionSends.length);
     });
     (s.h.ctx.agents.sessions as unknown as { cancelRun: unknown }).cancelRun = cancelRun;
-    const sessions = s.h.ctx.agents.sessions;
-    const sendMessage = sessions.sendMessage.bind(sessions);
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => (release = resolve));
-    let sendStarted = false;
-    sessions.sendMessage = async (sessionId, companyId, opts) => {
-      sendStarted = true;
-      await gate;
-      return sendMessage(sessionId, companyId, opts);
-    };
-    const sending = s.h.request<SendMessageResponse>("POST", `/rooms/${s.room.id}/messages`, {
-      body: { companyId: s.company.id, idempotencyKey: randomUUID(), body: "thoughts?", mentions: [s.company.agents[0]!.id] },
-      actor: s.owner,
-    });
-    await vi.waitFor(() => expect(sendStarted).toBe(true));
+    const close = vi.spyOn(s.h.ctx.agents.sessions, "close");
+    const send = gateSends(s);
+    const sending = sendOne(s);
+    await vi.waitFor(() => expect(send.started).toBe(true));
     const roundId = await currentRoundId(s);
-    await control(s, "stop", roundId);
-    release();
+    expect((await control(s, "stop", roundId)).body.cancel).toBe("host");
+    send.release();
     expect((await sending).status).toBe(201);
 
     const sessionId = s.h.sessionSends[0]!.sessionId;
     expect(cancelRun).toHaveBeenLastCalledWith(sessionId, s.company.id, { reason: STOP_CANCEL_REASON });
     expect(runsAtCancel.at(-1)).toBe(1);
+
+    await runCancelled(s);
+    await settleTicks();
+    expect((await turnsOf(s, roundId))[0]).toMatchObject({ status: "finished", outcome: "failed", hostPending: false });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith(sessionId, s.company.id);
+    expect(s.h.activity.filter((e) => e.message === "Turn failed")).toHaveLength(1);
+    expect(await agentMessageCount(s)).toBe(0);
+    expect(s.creates).toHaveLength(1);
+    expect(await statusOf(s, roundId)).toBe("stopped");
   });
+
+  it.each(["host", "fallback"] as const)(
+    "is harmless when Stop lands after the run id is stored and before the send checks the Round (%s)",
+    async (mode) => {
+      const s = await setup();
+      const cancelRun = vi.fn().mockResolvedValue(undefined);
+      if (mode === "host") (s.h.ctx.agents.sessions as unknown as { cancelRun: unknown }).cancelRun = cancelRun;
+      const close = vi.spyOn(s.h.ctx.agents.sessions, "close");
+      // Hold the send right after it stored the run id, before its stopped check.
+      const db = s.h.ctx.db;
+      const execute = db.execute.bind(db);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let runIdStored = false;
+      db.execute = async (sql, params) => {
+        const result = await execute(sql, params);
+        if (/SET run_id = \$3::uuid/.test(sql)) {
+          runIdStored = true;
+          await gate;
+        }
+        return result;
+      };
+      const sending = sendOne(s);
+      await vi.waitFor(() => expect(runIdStored).toBe(true));
+      const roundId = await currentRoundId(s);
+      const runId = s.h.sessionSends[0]!.runId!;
+      const stop = await control(s, "stop", roundId);
+      expect(stop.body).toMatchObject(mode === "host" ? { cancel: "host" } : { cancel: "fallback", fallbackRunId: runId });
+      release();
+      expect((await sending).status).toBe(201);
+      expect(cancelRun).toHaveBeenCalledTimes(mode === "host" ? 2 : 0);
+
+      await runCancelled(s);
+      await runCancelled(s);
+      await sweep(s);
+      await settleTicks();
+      expect((await turnsOf(s, roundId))[0]).toMatchObject({ status: "finished", outcome: "failed", hostPending: false });
+      expect(s.h.activity.filter((e) => e.message === "Turn failed")).toHaveLength(1);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(await agentMessageCount(s)).toBe(0);
+      expect(s.creates).toHaveLength(1);
+      expect(await statusOf(s, roundId)).toBe("stopped");
+    },
+  );
 
   it("falls back on method not found, and remembers it for the worker's lifetime", async () => {
     const s = await setup();
