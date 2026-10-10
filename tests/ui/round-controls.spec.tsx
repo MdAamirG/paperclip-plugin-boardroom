@@ -152,7 +152,7 @@ describe("Round controls: Stop", () => {
   });
 });
 
-describe("Round controls: Stop while the run is still starting (no host cancel)", () => {
+describe("Round controls: Stop while the run is still starting", () => {
   /** Turn 1 is running but its send has not returned: no run id yet. */
   const starting = (turn: Partial<ReturnType<typeof turnFixture>> = {}) =>
     roundFixture({ status: "stopped", turns: [turnFixture({ id: "t1", agentName: "Ada", status: "running", runId: null, ...turn })] });
@@ -261,6 +261,17 @@ describe("Round controls: Stop while the run is still starting (no host cancel)"
 
     failReads = false;
     roomChanged(2);
+    await waitFor(() => expect(posts(api)).toEqual([`${BASE}/stop`, RUN_CANCEL]));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("also waits and cancels through the board route when Stop answered none (the host cancel may fail once the run starts)", async () => {
+    const rounds = { current: starting() };
+    const api = stopApi(rounds).on("POST", `${BASE}/stop`, stopResponse({ cancel: "none", round: starting() }));
+    const { roomChanged } = renderStarting(api);
+    await pressStop();
+    rounds.current = starting({ runId: "run-1" });
+    roomChanged(1);
     await waitFor(() => expect(posts(api)).toEqual([`${BASE}/stop`, RUN_CANCEL]));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

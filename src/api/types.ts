@@ -239,8 +239,9 @@ export interface StopRoundResponse {
   cancel: StopCancelResult;
   /**
    * Set when `cancel` is `fallback` and the run id is known: the run the page cancels through the
-   * board route. A `fallback` without it means the run was still starting: the page cancels it once
-   * the Turn has its run id (the Room is announced when it does).
+   * board route. When the running Turn in `round` has no run id yet (its run was still starting),
+   * whatever `cancel` says, the page cancels the run once the Turn has its id (the Room is announced
+   * when it does); with a host cancel the worker has usually done so already.
    */
   fallbackRunId?: string;
 }

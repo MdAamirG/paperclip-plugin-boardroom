@@ -9,7 +9,7 @@ import { Placeholder, RegionFrame, type RegionProps } from "./frame.js";
 
 type Control = "pause" | "resume" | "stop";
 
-/** A run Stop could not cancel (the host has no session cancel and the run id is not known yet). */
+/** A run that was still starting when Stop landed (no run id yet), which the page cancels once it has one. */
 interface AwaitedRun {
   roundId: string;
   turnId: string;
@@ -24,9 +24,10 @@ const RUN_NOT_CANCELLED = "The Round is stopped, but its run was not cancelled";
  * shown when it was stopped.
  *
  * Stop on a host without a session cancel answers `fallback`, and the page cancels the run through
- * the board route. When the Turn's run was still starting there is no run id yet: the page then
- * re-reads the Round on every Room change and cancels the run as soon as the Turn has its id
- * (and says so when the run ended first and its reply was kept).
+ * the board route. When the Turn's run was still starting there is no run id yet (whatever Stop
+ * answered): the page then re-reads the Round on every Room change and cancels the run as soon as
+ * the Turn has its id (and says so when the run ended first and its reply was kept). With a host
+ * cancel the worker has usually cancelled it already; a second cancel of a finished run is harmless.
  */
 export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom, onWaitingForRun }: RegionProps) {
   const round = detail.activeRound;
@@ -48,16 +49,18 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom,
       else {
         const result = await client.stopRound(detail.room.id, round.id);
         setConfirmingStop(false);
+        const running = result.round.turns.find((candidate) => candidate.status === "running");
         if (result.cancel === "fallback" && result.fallbackRunId) {
           await cancelRun(result.fallbackRunId);
-        } else if (result.cancel === "fallback") {
-          const turn = result.round.turns.find((candidate) => candidate.status === "running");
-          if (turn) setAwaitedRun({ roundId: result.round.id, turnId: turn.id });
         } else if (result.cancel === "failed") {
           setError({
             title: RUN_MAY_BE_RUNNING,
             error: new Error("The host could not cancel the run. Cancel it from the agent's run page if it keeps going."),
           });
+        } else if (running && (result.cancel === "fallback" || !running.runId)) {
+          // The run was still starting. The worker cancels it through the host when it can; this page
+          // also cancels it by its id once it has one, in case the host has no cancel or it fails.
+          setAwaitedRun({ roundId: result.round.id, turnId: running.id });
         }
       }
       reloadRoom();

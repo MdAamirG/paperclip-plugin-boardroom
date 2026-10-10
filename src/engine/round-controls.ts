@@ -96,7 +96,8 @@ async function cancelRunningTurn(ctx: PluginContext, round: Round): Promise<Stop
   if (!turn || !turn.sessionId) return { cancel: "none" };
   const result = await cancelSessionRun(ctx, turn.sessionId, round.companyId, STOP_CANCEL_REASON);
   // No run id yet: the send is in flight, and once it returns `dispatchTurn` sees the stopped Round
-  // and cancels the run itself. A host that refused now (it has no run to cancel yet) has not failed.
+  // and cancels the run itself (the page also cancels it by id, in case that fails). A host that
+  // refused now (it has no run to cancel yet) has not failed.
   if (!turn.runId && result === "failed") return { cancel: "none" };
   if (result === "fallback") {
     // The page cancels by run id. With none yet, `fallback` alone tells the page to cancel the run
