@@ -237,7 +237,11 @@ export type StopCancelResult = "host" | "fallback" | "none" | "failed";
 export interface StopRoundResponse {
   round: RoundView;
   cancel: StopCancelResult;
-  /** Set when `cancel` is `fallback`: the run the page cancels through the board route. */
+  /**
+   * Set when `cancel` is `fallback` and the run id is known: the run the page cancels through the
+   * board route. A `fallback` without it means the run was still starting: the page cancels it once
+   * the Turn has its run id (the Room is announced when it does).
+   */
   fallbackRunId?: string;
 }
 

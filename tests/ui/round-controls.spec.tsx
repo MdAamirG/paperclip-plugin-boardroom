@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { RoundControlResponse, StopRoundResponse } from "../../src/api/types.js";
-import { BoardroomApiError } from "../../src/ui/api.js";
+import { BoardroomApiError, BoardroomApiProvider } from "../../src/ui/api.js";
 import { RoundProgressRegion } from "../../src/ui/regions/round-progress.js";
 import { COMPANY_ID, detailFixture, roundFixture, turnFixture } from "../support/ui-fixtures.js";
 import { createMockApi, renderWithBoardroom, type MockBoardroomApi } from "../support/ui.js";
@@ -149,6 +149,74 @@ describe("Round controls: Stop", () => {
     fireEvent.click(button("Stop")!);
     fireEvent.click(button("Stop Round")!);
     expect(await screen.findByRole("alert")).toHaveTextContent("The Round is stopped, but its run may still be running");
+  });
+});
+
+describe("Round controls: Stop while the run is still starting (no host cancel)", () => {
+  /** Turn 1 is running but its send has not returned: no run id yet. */
+  const starting = (turn: Partial<ReturnType<typeof turnFixture>> = {}) =>
+    roundFixture({ status: "stopped", turns: [turnFixture({ id: "t1", agentName: "Ada", status: "running", runId: null, ...turn })] });
+
+  /** Render with a changeable `refreshKey` (the Room's live updates). */
+  function renderStarting(api: MockBoardroomApi) {
+    const detail = detailFixture({ activeRound: roundFixture({ turns: [turnFixture({ id: "t1", agentName: "Ada", status: "running", runId: null })] }) });
+    const region = (refreshKey: number) => <RoundProgressRegion companyId={COMPANY_ID} detail={detail} refreshKey={refreshKey} reloadRoom={() => undefined} />;
+    const result = renderWithBoardroom(() => region(0), { api });
+    // The same tree `renderWithBoardroom` renders, so the region keeps its state.
+    return { roomChanged: (refreshKey: number) => result.rerender(<BoardroomApiProvider api={api}>{region(refreshKey)}</BoardroomApiProvider>) };
+  }
+
+  function stopApi(rounds: { current: ReturnType<typeof roundFixture> }, cancel: () => unknown = () => ({})) {
+    return createMockApi()
+      .on("POST", `${BASE}/stop`, stopResponse({ cancel: "fallback", round: starting() }))
+      .on("GET", ROUNDS, () => ({ rounds: [rounds.current] }))
+      .on("POST", RUN_CANCEL, cancel);
+  }
+
+  async function pressStop() {
+    fireEvent.click(button("Stop")!);
+    fireEvent.click(button("Stop Round")!);
+    return screen.findByText(/cancelled from this page as soon as it starts/);
+  }
+
+  it("cancels the run through the board route once the Turn has its run id", async () => {
+    const rounds = { current: starting() };
+    const api = stopApi(rounds);
+    const { roomChanged } = renderStarting(api);
+    await pressStop();
+    expect(posts(api)).toEqual([`${BASE}/stop`]);
+
+    rounds.current = starting({ runId: "run-1" });
+    roomChanged(1);
+    await waitFor(() => expect(posts(api)).toEqual([`${BASE}/stop`, RUN_CANCEL]));
+    await waitFor(() => expect(screen.queryByText(/cancelled from this page as soon as it starts/)).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says the run may still be running when that cancel fails", async () => {
+    const rounds = { current: starting({ runId: "run-1" }) };
+    const api = stopApi(rounds, () => {
+      throw new BoardroomApiError(403, { error: "Forbidden" });
+    });
+    renderStarting(api);
+    fireEvent.click(button("Stop")!);
+    fireEvent.click(button("Stop Round")!);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The Round is stopped, but its run may still be running");
+    expect(alert).toHaveTextContent("Forbidden");
+    expect(posts(api)).toEqual([`${BASE}/stop`, RUN_CANCEL]);
+  });
+
+  it("stops waiting without a cancel when the Turn settled without a run", async () => {
+    const rounds = { current: starting() };
+    const api = stopApi(rounds);
+    const { roomChanged } = renderStarting(api);
+    await pressStop();
+    rounds.current = starting({ status: "finished", outcome: "skipped", skipReason: "stopped" });
+    roomChanged(1);
+    await waitFor(() => expect(screen.queryByText(/cancelled from this page as soon as it starts/)).not.toBeInTheDocument());
+    expect(posts(api)).toEqual([`${BASE}/stop`]);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 

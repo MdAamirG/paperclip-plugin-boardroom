@@ -336,6 +336,35 @@ describe("Stop", () => {
     await expect(cancelRun.mock.results[1]!.value).resolves.toBeUndefined();
   });
 
+  it("hands the page a run id-less fallback when the send is in flight on a host without the cancel, and announces the run id", async () => {
+    const s = await setup();
+    const send = gateSends(s);
+    const sending = sendOne(s);
+    await vi.waitFor(() => expect(send.started).toBe(true));
+    const roundId = await currentRoundId(s);
+    const stop = await control(s, "stop", roundId);
+    // The page cancels the run once the Turn has its run id (there is none yet).
+    expect(stop.body.cancel).toBe("fallback");
+    expect(stop.body.fallbackRunId).toBeUndefined();
+    expect(stop.body.round.turns[0]).toMatchObject({ status: "running", runId: null });
+    s.h.streamEvents.length = 0;
+    send.release();
+    expect((await sending).status).toBe(201);
+
+    const runId = s.h.sessionSends[0]!.runId;
+    expect((await turnsOf(s, roundId))[0]).toMatchObject({ status: "running", runId });
+    expect(s.h.streamEvents.some((e) => (e.event as { roomId?: string }).roomId === s.room.id)).toBe(true);
+    expect(s.h.logs.some((l) => /could not cancel a run that started after its Round was stopped/.test(l.message))).toBe(true);
+
+    // Not cancelled (no page, or its cancel failed): the run's reply is kept, as for a known run id.
+    await reply(s, roundId, 0, "Late view");
+    await settleTicks();
+    expect((await turnsOf(s, roundId))[0]).toMatchObject({ outcome: "posted" });
+    expect(await agentMessageCount(s)).toBe(1);
+    expect(s.creates).toHaveLength(1);
+    expect(await statusOf(s, roundId)).toBe("stopped");
+  });
+
   it.each(["host", "fallback"] as const)(
     "is harmless when Stop lands after the run id is stored and before the send checks the Round (%s)",
     async (mode) => {

@@ -91,15 +91,17 @@ async function cancelRunningTurn(ctx: PluginContext, round: Round): Promise<Stop
     ctx.logger.warn("Boardroom could not read the running Turn to cancel it", { roundId: round.id, error: errorMessage(error) });
     return { cancel: "failed" };
   }
-  // No running Turn, or one whose session was not created yet (it is still starting): nothing to cancel.
+  // No running Turn, or one whose session was not created yet (it is still starting, and
+  // `dispatchTurn` skips it once it sees the stopped Round): nothing to cancel.
   if (!turn || !turn.sessionId) return { cancel: "none" };
   const result = await cancelSessionRun(ctx, turn.sessionId, round.companyId, STOP_CANCEL_REASON);
   // No run id yet: the send is in flight, and once it returns `dispatchTurn` sees the stopped Round
   // and cancels the run itself. A host that refused now (it has no run to cancel yet) has not failed.
   if (!turn.runId && result === "failed") return { cancel: "none" };
   if (result === "fallback") {
-    // The page cancels by run id; a Turn that has no run id yet has nothing to hand over.
-    return turn.runId ? { cancel: "fallback", fallbackRunId: turn.runId } : { cancel: "none" };
+    // The page cancels by run id. With none yet, `fallback` alone tells the page to cancel the run
+    // once the Turn has its id (`dispatchTurn` announces the Room when it does).
+    return turn.runId ? { cancel: "fallback", fallbackRunId: turn.runId } : { cancel: "fallback" };
   }
   return { cancel: result };
 }

@@ -209,9 +209,14 @@ async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promi
       ctx.logger.warn("Boardroom could not store a run id", { turnId: turn.id, runId, error: errorMessage(error) });
     }
     // A Stop that landed during the send had no run to cancel yet: cancel it now. The Turn then
-    // settles from the cancelled run like any stopped Turn.
-    if ((await roundIsStopped(ctx, companyId, round.id)) && (await cancelSessionRun(ctx, session.sessionId, companyId, STOP_CANCEL_REASON)) !== "host") {
-      ctx.logger.warn("Boardroom could not cancel a run that started after its Round was stopped", { turnId: turn.id, runId });
+    // settles from the cancelled run like any stopped Turn. Without a host cancel, Stop answered
+    // `fallback` with no run id and the page cancels the run by its id: announce the Room so the
+    // page re-reads and finds it. A run nobody cancels settles like one whose cancel failed.
+    if (await roundIsStopped(ctx, companyId, round.id)) {
+      if ((await cancelSessionRun(ctx, session.sessionId, companyId, STOP_CANCEL_REASON)) !== "host") {
+        ctx.logger.warn("Boardroom could not cancel a run that started after its Round was stopped", { turnId: turn.id, runId });
+      }
+      announceRoomChanged(ctx, companyId, round.roomId);
     }
     return true;
   } catch (error) {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { RoundView } from "../../api/types.js";
 import { cancelHostRun, useBoardroomApi, useBoardroomClient } from "../api.js";
 import { ErrorNotice } from "../components/ErrorNotice.js";
@@ -9,10 +9,22 @@ import { Placeholder, RegionFrame, type RegionProps } from "./frame.js";
 
 type Control = "pause" | "resume" | "stop";
 
+/** A run Stop could not cancel (the host has no session cancel and the run id is not known yet). */
+interface AwaitedRun {
+  roundId: string;
+  turnId: string;
+}
+
+const RUN_MAY_BE_RUNNING = "The Round is stopped, but its run may still be running";
+
 /**
  * The active Round's Turns in order, each with its status, and Pause, Resume and Stop for a user
  * with `control` (each only in a valid state). With no active Round, the Room's latest Round is
  * shown when it was stopped.
+ *
+ * Stop on a host without a session cancel answers `fallback`, and the page cancels the run through
+ * the board route. When the Turn's run was still starting there is no run id yet: the page then
+ * re-reads the Round on every Room change and cancels the run as soon as the Turn has its id.
  */
 export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom }: RegionProps) {
   const round = detail.activeRound;
@@ -21,6 +33,7 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom 
   const [busy, setBusy] = useState<Control | null>(null);
   const [confirmingStop, setConfirmingStop] = useState(false);
   const [error, setError] = useState<{ title: string; error: Error } | null>(null);
+  const [awaitedRun, setAwaitedRun] = useState<AwaitedRun | null>(null);
   const canControl = detail.permissions.canControl && detail.room.status === "open";
 
   async function run(control: Control) {
@@ -34,18 +47,13 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom 
         const result = await client.stopRound(detail.room.id, round.id);
         setConfirmingStop(false);
         if (result.cancel === "fallback" && result.fallbackRunId) {
-          try {
-            await cancelHostRun(api, result.fallbackRunId);
-          } catch (failure) {
-            const reason = toError(failure).message;
-            setError({
-              title: "The Round is stopped, but its run may still be running",
-              error: new Error(`The run could not be cancelled (${reason}). Cancel it from the agent's run page if it keeps going.`),
-            });
-          }
+          await cancelRun(result.fallbackRunId);
+        } else if (result.cancel === "fallback") {
+          const turn = result.round.turns.find((candidate) => candidate.status === "running");
+          if (turn) setAwaitedRun({ roundId: result.round.id, turnId: turn.id });
         } else if (result.cancel === "failed") {
           setError({
-            title: "The Round is stopped, but its run may still be running",
+            title: RUN_MAY_BE_RUNNING,
             error: new Error("The host could not cancel the run. Cancel it from the agent's run page if it keeps going."),
           });
         }
@@ -58,6 +66,47 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom 
       setBusy(null);
     }
   }
+
+  async function cancelRun(runId: string) {
+    try {
+      await cancelHostRun(api, runId);
+    } catch (failure) {
+      const reason = toError(failure).message;
+      setError({
+        title: RUN_MAY_BE_RUNNING,
+        error: new Error(`The run could not be cancelled (${reason}). Cancel it from the agent's run page if it keeps going.`),
+      });
+    }
+  }
+
+  // Waiting for the run id of a run Stop could not cancel: look again on every Room change.
+  useEffect(() => {
+    if (!awaitedRun) return;
+    let current = true;
+    void (async () => {
+      try {
+        const { rounds } = await client.listRounds(detail.room.id);
+        if (!current) return;
+        const turn = rounds.find((r) => r.id === awaitedRun.roundId)?.turns.find((t) => t.id === awaitedRun.turnId);
+        if (turn?.status === "running" && !turn.runId) return; // Still being sent.
+        if (!turn) throw new Error("The stopped Turn could not be found");
+        setAwaitedRun(null);
+        // A Turn that finished meanwhile has nothing left to cancel (it was skipped, or its run ended).
+        if (turn.status === "running" && turn.runId) await cancelRun(turn.runId);
+      } catch (failure) {
+        if (!current) return;
+        setAwaitedRun(null);
+        setError({
+          title: RUN_MAY_BE_RUNNING,
+          error: new Error(`The run could not be checked (${toError(failure).message}). Cancel it from the agent's run page if it keeps going.`),
+        });
+      }
+    })();
+    return () => {
+      current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `cancelRun` only closes over `api`.
+  }, [awaitedRun, refreshKey, client, api, detail.room.id]);
 
   return (
     <RegionFrame region="round-progress" title="Round progress">
@@ -79,6 +128,11 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom 
       ) : (
         <NoActiveRound companyId={companyId} detail={detail} refreshKey={refreshKey} />
       )}
+      {awaitedRun ? (
+        <p className="br-notice br-small" role="status">
+          The Round is stopped. The agent's run is still starting; it is cancelled from this page as soon as it starts. Keep this page open until then.
+        </p>
+      ) : null}
       {error ? <ErrorNotice title={error.title} error={error.error} /> : null}
     </RegionFrame>
   );

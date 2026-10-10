@@ -139,7 +139,7 @@ export interface BoardroomClient {
   getCosts(roomId: string): Promise<RoomCostsResponse>;
   pauseRound(roomId: string, roundId: string): Promise<RoundControlResponse>;
   resumeRound(roomId: string, roundId: string): Promise<RoundControlResponse>;
-  /** Stop the Round; `cancel: "fallback"` means the page must cancel `fallbackRunId` (see `cancelHostRun`). */
+  /** Stop the Round; `cancel: "fallback"` means the page must cancel `fallbackRunId`, or the Turn's run once it has one (see `cancelHostRun`). */
   stopRound(roomId: string, roundId: string): Promise<StopRoundResponse>;
   /** Close the Room (no Round may be active); answers with the Room detail. */
   closeRoom(roomId: string): Promise<RoomDetail>;
