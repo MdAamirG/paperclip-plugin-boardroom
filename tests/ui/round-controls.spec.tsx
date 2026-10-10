@@ -241,6 +241,29 @@ describe("Round controls: Stop while the run is still starting (no host cancel)"
     await waitFor(() => expect(screen.queryByText(/cancelled from this page as soon as it starts/)).not.toBeInTheDocument());
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("keeps waiting after a failed read of the Round and cancels on the next Room change", async () => {
+    const rounds = { current: starting() };
+    let failReads = false;
+    const api = stopApi(rounds);
+    api.on("GET", ROUNDS, () => {
+      if (failReads) throw new BoardroomApiError(503, { error: "Unavailable" });
+      return { rounds: [rounds.current] };
+    });
+    const { roomChanged } = renderStarting(api);
+    await pressStop();
+    failReads = true;
+    rounds.current = starting({ runId: "run-1" });
+    roomChanged(1);
+    await waitFor(() => expect(api.calls.filter((c) => c.path === ROUNDS)).toHaveLength(2));
+    expect(screen.getByText(/cancelled from this page as soon as it starts/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    failReads = false;
+    roomChanged(2);
+    await waitFor(() => expect(posts(api)).toEqual([`${BASE}/stop`, RUN_CANCEL]));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
 
 describe("Round progress: stopped state", () => {

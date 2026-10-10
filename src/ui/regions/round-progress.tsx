@@ -81,36 +81,37 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom,
     }
   }
 
-  // Waiting for the run id of a run Stop could not cancel: look again on every Room change.
+  // Waiting for the run id of a run Stop could not cancel: look again on every Room change. A
+  // failed read keeps the wait (the next Room change or poll tries again).
   useEffect(() => {
     if (!awaitedRun) return;
     let current = true;
     void (async () => {
+      let rounds: RoundView[];
       try {
-        const { rounds } = await client.listRounds(detail.room.id);
-        if (!current) return;
-        const turn = rounds.find((r) => r.id === awaitedRun.roundId)?.turns.find((t) => t.id === awaitedRun.turnId);
-        if (turn?.status === "running" && !turn.runId) return; // Still being sent.
-        if (!turn) throw new Error("The stopped Turn could not be found");
-        setAwaitedRun(null);
-        if (turn.status === "running" && turn.runId) {
-          await cancelRun(turn.runId);
-        } else if (turn.outcome === "posted" || turn.outcome === "silent") {
-          // The run ended before this page saw its id: it was not cancelled and its reply was kept.
-          setError({
-            title: RUN_NOT_CANCELLED,
-            error: new Error("The agent's run finished before this page could cancel it, and its reply (if any) was kept."),
-          });
-        }
-        // Skipped (no run started) or failed (cancelled, or the run failed): nothing more to do.
-      } catch (failure) {
-        if (!current) return;
-        setAwaitedRun(null);
+        ({ rounds } = await client.listRounds(detail.room.id));
+      } catch {
+        return;
+      }
+      if (!current) return;
+      const turn = rounds.find((r) => r.id === awaitedRun.roundId)?.turns.find((t) => t.id === awaitedRun.turnId);
+      if (turn?.status === "running" && !turn.runId) return; // Still being sent.
+      setAwaitedRun(null);
+      if (!turn) {
         setError({
           title: RUN_MAY_BE_RUNNING,
-          error: new Error(`The run could not be checked (${toError(failure).message}). Cancel it from the agent's run page if it keeps going.`),
+          error: new Error("The stopped Turn could not be found. Cancel its run from the agent's run page if it keeps going."),
+        });
+      } else if (turn.status === "running" && turn.runId) {
+        await cancelRun(turn.runId);
+      } else if (turn.outcome === "posted" || turn.outcome === "silent") {
+        // The run ended before this page saw its id: it was not cancelled and its reply was kept.
+        setError({
+          title: RUN_NOT_CANCELLED,
+          error: new Error("The agent's run finished before this page could cancel it, and its reply (if any) was kept."),
         });
       }
+      // Skipped (no run started) or failed (cancelled, or the run failed): nothing more to do.
     })();
     return () => {
       current = false;
