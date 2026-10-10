@@ -15,6 +15,7 @@ First release. Not yet published to npm. Checked once by hand on a local Papercl
 - Markdown lists keep their bullets and numbers (F8).
 - Stop while a Turn is still starting no longer lets that Turn's run start: the Turn is skipped as stopped and its session closed. A run whose send was in flight is cancelled once it exists, when the host offers the session-run cancel.
 - A posted Turn whose reply the sweep had to recover (the worker stopped between settling the Turn and linking its Message) gets one "Turn posted" or "Turn failed" activity entry instead of two, and its session is closed.
+- Stop during a Turn's send no longer reports that the cancel failed (and warns that the run may still be running) when a host with the session-run cancel refuses it because the run has not started yet. The run is cancelled a moment later, once the send returns.
 - README: retries, known limits and access notes corrected after the manual check (F3, F4, F7).
 
 ### Added

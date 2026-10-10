@@ -314,6 +314,28 @@ describe("Stop", () => {
     expect(await statusOf(s, roundId)).toBe("stopped");
   });
 
+  it("does not report failed when the host refuses the cancel because the run has not started yet", async () => {
+    const s = await setup();
+    // Like a real host: a session with no run yet has nothing to cancel.
+    const cancelRun = vi.fn(async (sessionId: string) => {
+      if (!s.h.sessionSends.some((send) => send.sessionId === sessionId && send.runId)) throw new Error("No active run for this session");
+    });
+    (s.h.ctx.agents.sessions as unknown as { cancelRun: unknown }).cancelRun = cancelRun;
+    const send = gateSends(s);
+    const sending = sendOne(s);
+    await vi.waitFor(() => expect(send.started).toBe(true));
+    const roundId = await currentRoundId(s);
+    const stop = await control(s, "stop", roundId);
+    expect(stop.body.cancel).toBe("none");
+    expect(stop.body.fallbackRunId).toBeUndefined();
+    expect(s.h.activity.find((e) => e.message === "Round stopped")!.metadata).toMatchObject({ cancel: "none" });
+    send.release();
+    expect((await sending).status).toBe(201);
+    // The run that started is cancelled by the send's own check, which the host accepts.
+    expect(cancelRun).toHaveBeenCalledTimes(2);
+    await expect(cancelRun.mock.results[1]!.value).resolves.toBeUndefined();
+  });
+
   it.each(["host", "fallback"] as const)(
     "is harmless when Stop lands after the run id is stored and before the send checks the Round (%s)",
     async (mode) => {
