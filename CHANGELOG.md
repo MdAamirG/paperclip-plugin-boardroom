@@ -12,6 +12,7 @@ First release. Not yet published to npm. Checked once by hand on a local Papercl
 - A refused session start is only a skipped Turn when the host refused the agent itself (not invokable, paused, over budget, gone, company not active, skipped by its wake policy). Any other error fails the Turn with the real error text (F2).
 - The page polls (5 s during a Round, 30 s otherwise, not while hidden) when the host's live stream is off, and the notice no longer tells the person to reload (F5).
 - Markdown lists keep their bullets and numbers (F8).
+- Stop while a Turn is still starting no longer lets that Turn's run start: the Turn is skipped as stopped and its session closed. A run whose send was in flight is cancelled once it exists, when the host offers the session-run cancel.
 - README: retries, known limits and access notes corrected after the manual check (F3, F4, F7).
 
 ### Added

@@ -4,11 +4,11 @@ import { announceRoomChanged } from "../api/live.js";
 import { touchRoomSafely } from "../api/room-touch.js";
 import type { StopCancelResult } from "../api/types.js";
 import { getRunningTurn, setRoundStatus, skipQueuedTurnsAsStopped, type Round } from "../db/index.js";
+import { STOP_CANCEL_REASON } from "../constants.js";
 import { cancelSessionRun } from "../host-features.js";
 import { advanceRound } from "./rounds.js";
 
-/** The reason the host records on a cancelled run. */
-export const STOP_CANCEL_REASON = "Boardroom: Round stopped";
+export { STOP_CANCEL_REASON };
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 

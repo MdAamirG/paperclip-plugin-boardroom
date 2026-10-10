@@ -31,6 +31,8 @@ import {
   type RoomMessage,
   type Turn,
 } from "../db/index.js";
+import { STOP_CANCEL_REASON } from "../constants.js";
+import { cancelSessionRun } from "../host-features.js";
 import { buildTurnPrompt, type PromptMessage } from "./prompt.js";
 import { isUuid } from "../api/validation.js";
 
@@ -186,6 +188,13 @@ async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promi
     const reason = `Boardroom: ${room.title}`;
     const session = await ctx.agents.sessions.create(turn.agentId, companyId, { reason });
     await setTurnSession(ctx.db, companyId, turn.id, session.sessionId);
+    // A Stop that landed while this Turn was starting found nothing to cancel: start no run.
+    if (await roundIsStopped(ctx, companyId, round.id)) {
+      if (await skipRunningTurn(ctx.db, companyId, turn.id, { reason: "stopped" })) {
+        await finalizeTurn(ctx, companyId, turn.id, { advance: false });
+      }
+      return false;
+    }
     const { runId } = await ctx.agents.sessions.sendMessage(session.sessionId, companyId, {
       prompt,
       reason,
@@ -197,6 +206,11 @@ async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promi
       // The agent is already running; the run id also arrives with its completion event.
       ctx.logger.warn("Boardroom could not store a run id", { turnId: turn.id, runId, error: errorMessage(error) });
     }
+    // A Stop that landed during the send had no run to cancel yet: cancel it now. The Turn then
+    // settles from the cancelled run like any stopped Turn.
+    if ((await roundIsStopped(ctx, companyId, round.id)) && (await cancelSessionRun(ctx, session.sessionId, companyId, STOP_CANCEL_REASON)) !== "host") {
+      ctx.logger.warn("Boardroom could not cancel a run that started after its Round was stopped", { turnId: turn.id, runId });
+    }
     return true;
   } catch (error) {
     ctx.logger.warn("Boardroom could not run a Turn", { turnId: turn.id, error: errorMessage(error) });
@@ -207,6 +221,15 @@ async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promi
       // Anything else (a scope error, a host fault) is a failed Turn with the real error text, not a claim about the agent.
       await settleTurn(ctx, companyId, turn.id, { outcome: "failed", hostMessage: errorMessage(error) }, { advance: false });
     }
+    return false;
+  }
+}
+
+/** Whether the Round was stopped meanwhile. A failed read counts as not stopped (the Turn goes ahead as before). */
+async function roundIsStopped(ctx: PluginContext, companyId: string, roundId: string): Promise<boolean> {
+  try {
+    return (await getRound(ctx.db, companyId, roundId))?.status === "stopped";
+  } catch {
     return false;
   }
 }

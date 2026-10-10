@@ -8,6 +8,7 @@ import type { ApiErrorBody } from "../../src/api/errors.js";
 import type { RoomDetail, RoundControlResponse, SendMessageResponse, StopRoundResponse } from "../../src/api/types.js";
 import { ROUND_SWEEP_JOB_KEY } from "../../src/constants.js";
 import { getRoom, getRound, listTurns } from "../../src/db/index.js";
+import { table } from "../../src/db/sql.js";
 import { STOP_CANCEL_REASON } from "../../src/engine/round-controls.js";
 import { isMethodNotFound } from "../../src/host-features.js";
 import { createBoardroomHarness, type BoardroomHarness } from "../support/harness.js";
@@ -63,6 +64,11 @@ const control = (s: Setup, verb: "pause" | "resume" | "stop", roundId: string, a
   });
 const turnsOf = (s: Setup, roundId: string) => listTurns(s.h.ctx.db, s.company.id, roundId);
 const statusOf = async (s: Setup, roundId: string) => (await getRound(s.h.ctx.db, s.company.id, roundId))!.status;
+/** The Round being started (read from its first Turn), while the send request is still in flight. */
+async function currentRoundId(s: Setup): Promise<string> {
+  const rows = await s.h.ctx.db.query<{ round_id: string }>(`SELECT round_id FROM ${table(s.h.ctx.db, "turns")} WHERE company_id = $1 LIMIT 1`, [s.company.id]);
+  return rows[0]!.round_id;
+}
 const sweep = (s: Setup) => s.h.sdk.runJob(ROUND_SWEEP_JOB_KEY);
 
 /** Finish the Turn behind send `index` with a live `done` event and wait until it is settled. */
@@ -201,6 +207,75 @@ describe("Stop", () => {
     expect(cancelRun).toHaveBeenCalledTimes(1);
     expect(cancelRun).toHaveBeenCalledWith(s.h.sessionSends[0]!.sessionId, s.company.id, { reason: STOP_CANCEL_REASON });
     expect(STOP_CANCEL_REASON).toBe("Boardroom: Round stopped");
+  });
+
+  it("starts no run for a Turn that was still starting when Stop landed, and closes its session", async () => {
+    const s = await setup();
+    const sessions = s.h.ctx.agents.sessions;
+    const create = sessions.create.bind(sessions);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let createStarted = false;
+    sessions.create = async (agentId, companyId, opts) => {
+      createStarted = true;
+      await gate;
+      return create(agentId, companyId, opts);
+    };
+    const close = vi.spyOn(sessions, "close");
+    const agents = s.company.agents.slice(0, 2);
+    const sending = s.h.request<SendMessageResponse>("POST", `/rooms/${s.room.id}/messages`, {
+      body: { companyId: s.company.id, idempotencyKey: randomUUID(), body: "thoughts?", mentions: agents.map((a) => a.id) },
+      actor: s.owner,
+    });
+    await vi.waitFor(() => expect(createStarted).toBe(true));
+    const roundId = await currentRoundId(s);
+    const stop = await control(s, "stop", roundId);
+    expect(stop.body.cancel).toBe("none");
+    release();
+    expect((await sending).status).toBe(201);
+    await settleTicks();
+
+    expect(s.h.sessionSends).toHaveLength(0);
+    const turns = await turnsOf(s, roundId);
+    expect(turns.map((t) => [t.outcome, t.skipReason])).toEqual([
+      ["skipped", "stopped"],
+      ["skipped", "stopped"],
+    ]);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(await statusOf(s, roundId)).toBe("stopped");
+  });
+
+  it("cancels a run whose send was in flight when Stop landed", async () => {
+    const s = await setup();
+    // How many runs existed at each cancel: Stop's own cancel comes before the send started one.
+    const runsAtCancel: number[] = [];
+    const cancelRun = vi.fn(async () => {
+      runsAtCancel.push(s.h.sessionSends.length);
+    });
+    (s.h.ctx.agents.sessions as unknown as { cancelRun: unknown }).cancelRun = cancelRun;
+    const sessions = s.h.ctx.agents.sessions;
+    const sendMessage = sessions.sendMessage.bind(sessions);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let sendStarted = false;
+    sessions.sendMessage = async (sessionId, companyId, opts) => {
+      sendStarted = true;
+      await gate;
+      return sendMessage(sessionId, companyId, opts);
+    };
+    const sending = s.h.request<SendMessageResponse>("POST", `/rooms/${s.room.id}/messages`, {
+      body: { companyId: s.company.id, idempotencyKey: randomUUID(), body: "thoughts?", mentions: [s.company.agents[0]!.id] },
+      actor: s.owner,
+    });
+    await vi.waitFor(() => expect(sendStarted).toBe(true));
+    const roundId = await currentRoundId(s);
+    await control(s, "stop", roundId);
+    release();
+    expect((await sending).status).toBe(201);
+
+    const sessionId = s.h.sessionSends[0]!.sessionId;
+    expect(cancelRun).toHaveBeenLastCalledWith(sessionId, s.company.id, { reason: STOP_CANCEL_REASON });
+    expect(runsAtCancel.at(-1)).toBe(1);
   });
 
   it("falls back on method not found, and remembers it for the worker's lifetime", async () => {

@@ -6,3 +6,6 @@ export const BOARDROOM_ROUTE_PATH = "boardroom";
 
 /** Manifest job key of the one-minute Round sweep. */
 export const ROUND_SWEEP_JOB_KEY = "round-sweep";
+
+/** The reason the host records on a run cancelled because its Round was stopped. */
+export const STOP_CANCEL_REASON = "Boardroom: Round stopped";
