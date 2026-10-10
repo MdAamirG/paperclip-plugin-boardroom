@@ -300,18 +300,64 @@ function handleSessionEvent(ctx: PluginContext, companyId: string, turnId: strin
 }
 
 /**
- * Settle a running Turn from any signal (the live event today; the run event and the sweep later).
+ * Settlements running in this worker, by Turn id. The host sends a run's live `done` just before its
+ * `agent.run.finished`, so the run event handler usually arrives while the live settlement is still
+ * saving the reply; it waits on these (`settlementsInFlight`) and then does the host part, which the
+ * live callback is not allowed to do. Module state, like the worker process it models.
+ */
+const inFlightSettlements = new Map<string, Set<Promise<boolean>>>();
+
+/**
+ * Wait until every settlement of this Turn running in this worker has ended, or `timeoutMs` has passed.
+ * Never throws. Settlements in another worker process are not seen; the caller polls the database for those.
+ */
+export async function settlementsInFlight(turnId: string, timeoutMs: number): Promise<void> {
+  const running = inFlightSettlements.get(turnId);
+  if (!running || running.size === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, Math.max(0, timeoutMs));
+  });
+  try {
+    await Promise.race([Promise.allSettled([...running]), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Settle a running Turn from any signal (the live event, the run event, the sweep, a failed start).
  * Settle-once: the first signal wins through a conditional update (`WHERE status = 'running'`); any
  * later one returns false and changes nothing. The winner saves the reply Message (for `posted`),
- * writes the system activity entry, closes the session and advances the Round (unless
- * `advance: false`, used when the caller advances itself).
+ * then does the host part (`finalizeTurn`: activity entry, session close, advancing the Round,
+ * unless `advance: false`, used when the caller advances itself) if the host accepts calls here.
+ * While it runs it is listed in `inFlightSettlements`.
  */
-export async function settleTurn(
+export function settleTurn(
   ctx: PluginContext,
   companyId: string,
   turnId: string,
   settlement: TurnSettlement,
   options: { advance?: boolean } = {},
+): Promise<boolean> {
+  const work = settleTurnOnce(ctx, companyId, turnId, settlement, options);
+  let running = inFlightSettlements.get(turnId);
+  if (!running) inFlightSettlements.set(turnId, (running = new Set()));
+  running.add(work);
+  const done = () => {
+    running.delete(work);
+    if (running.size === 0 && inFlightSettlements.get(turnId) === running) inFlightSettlements.delete(turnId);
+  };
+  work.then(done, done);
+  return work;
+}
+
+async function settleTurnOnce(
+  ctx: PluginContext,
+  companyId: string,
+  turnId: string,
+  settlement: TurnSettlement,
+  options: { advance?: boolean },
 ): Promise<boolean> {
   const claimedRunId = isUuid(settlement.runId) ? settlement.runId : null;
   const won = await finishRunningTurn(ctx.db, companyId, turnId, {
@@ -361,7 +407,9 @@ export async function settleTurn(
  * update and advancing the Round. These are worker-to-host calls, which the host admits only
  * inside an invocation for the company (or for a company with a plugin configuration row). A
  * live session event is neither, so there the Turn stays `host_pending` and a later signal that
- * is inside an invocation (a run event, an API request) or the sweep finishes it. Done once: the
+ * is inside an invocation finishes it: the run's `agent.run.finished` (which waits for the live
+ * settlement to finish saving, see `handleRunEvent`), an API request, or the sweep for a company
+ * with a configuration row. Done once: the
  * `host_pending` claim decides. Returns true when this call did it.
  */
 export async function finalizeTurn(
