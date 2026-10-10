@@ -1,7 +1,5 @@
 import type { PluginContext, PluginEvent } from "@paperclipai/plugin-sdk";
 import { ROUND_SWEEP_JOB_KEY } from "../constants.js";
-import { audit } from "../api/audit.js";
-import { announceRoomChanged } from "../api/live.js";
 import { touchRoomSafely } from "../api/room-touch.js";
 import { isUuid } from "../api/validation.js";
 import {
@@ -182,6 +180,8 @@ async function sweepRunningTurn(ctx: PluginContext, companyId: string, turn: Tur
 /**
  * A Turn was marked `posted` but the worker died before the Message was linked. Link a Message
  * that exists; otherwise save the reply from the run summary; otherwise the Turn becomes `failed`.
+ * DB only: the Turn is still `host_pending`, so `finishPendingHostWork` (right after, or from the
+ * next context the host accepts) writes its one activity entry and closes its session.
  */
 async function repairPostedTurn(ctx: PluginContext, companyId: string, turn: Turn): Promise<void> {
   const round = await getRound(ctx.db, companyId, turn.roundId);
@@ -209,12 +209,4 @@ async function repairPostedTurn(ctx: PluginContext, companyId: string, turn: Tur
   } else {
     await markPostedTurnFailed(ctx.db, companyId, turn.id, "The reply could not be saved");
   }
-  await audit(ctx, {
-    companyId,
-    actingUserId: null,
-    roomId: round.roomId,
-    message: messageId ? "Turn posted" : "Turn failed",
-    metadata: { roundId: round.id, turnId: turn.id, agentId: turn.agentId, runId: turn.runId, outcome: messageId ? "posted" : "failed", messageId, repaired: true },
-  });
-  announceRoomChanged(ctx, companyId, round.roomId);
 }

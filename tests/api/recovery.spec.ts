@@ -213,9 +213,9 @@ describe("posted Turns whose Message was lost", () => {
   async function orphan(s: Setup, ageSeconds: number, summary: string | null) {
     const { roundId, ceo } = await startTwoAgentRound(s);
     const [first] = await turnsOf(s, roundId);
-    // The worker settled the Turn as posted, then died before saving the Message.
+    // The worker settled the Turn as posted (`host_pending` set, as `finishRunningTurn` does), then died before saving the Message.
     await s.h.sql(
-      `UPDATE ${SCHEMA}.turns SET status = 'finished', outcome = 'posted', finished_at = now() - $1::int * interval '1 second' WHERE id = $2`,
+      `UPDATE ${SCHEMA}.turns SET status = 'finished', outcome = 'posted', host_pending = true, finished_at = now() - $1::int * interval '1 second' WHERE id = $2`,
       [ageSeconds, first!.id],
     );
     if (summary !== null) await seedRun(s, { id: first!.runId!, companyId: s.company.id, agentId: ceo.id, status: "succeeded", resultJson: { summary } });
@@ -252,6 +252,22 @@ describe("posted Turns whose Message was lost", () => {
     await sweep(s);
     expect((await turnsOf(s, roundId))[0]).toMatchObject({ outcome: "failed", hostMessage: "The reply could not be saved" });
     expect(await agentMessages(s)).toHaveLength(0);
+  });
+
+  it.each([
+    ["posted", "Recovered reply"],
+    ["failed", null],
+  ] as const)("writes one Turn %s entry for a repaired Turn, and closes its session", async (outcome, summary) => {
+    const s = await setup();
+    const close = vi.spyOn(s.h.ctx.agents.sessions, "close");
+    const { first } = await orphan(s, POSTED_REPAIR_GRACE_SECONDS + 10, summary);
+    await sweep(s);
+    await sweep(s);
+    const entries = s.h.activity.filter((e) => /^Turn /.test(e.message) && (e.metadata as { turnId?: string }).turnId === first.id);
+    expect(entries.map((e) => e.message)).toEqual([`Turn ${outcome}`]);
+    expect(entries[0]!.metadata).toMatchObject({ outcome, runId: first.runId });
+    expect(close).toHaveBeenCalledWith(first.sessionId, s.company.id);
+    expect((await turnsOf(s, first.roundId))[0]!.hostPending).toBe(false);
   });
 
   it("leaves a recently posted Turn alone", async () => {
