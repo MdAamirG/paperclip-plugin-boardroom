@@ -8,8 +8,8 @@ First release. Not yet published to npm. Checked once by hand on a local Papercl
 
 ### Fixed
 
-- A multi-Turn Round no longer stops after the first Turn in a company that has no plugin configuration row (manual check F1). The host refuses worker calls made outside an invocation (a live agent reply, a job) for such a company. Settling a Turn now saves the outcome and reply at once and does the host-side work (activity entry, closing the session, starting the next Turn) from the next context the host accepts: a run event, a page request, or the sweep. Adds migration `002_turn_host_pending.sql`.
-- A refused session start is only a skipped Turn when the host refused the agent itself (not invokable, paused, over budget, gone). Any other error fails the Turn with the real error text (F2).
+- A multi-Turn Round no longer stops after the first Turn in a company that has no plugin configuration row (manual check F1). The host refuses worker calls made outside an invocation (a live agent reply, a job) for such a company. Settling a Turn now saves the outcome and reply at once and does the host-side work (activity entry, closing the session, starting the next Turn) from the next context the host accepts: a run event, a page request, or the sweep. The host's refusal is recognised by its error code and in all its wordings (including "company context is required"), and the next Turn never starts before the previous reply is saved. Adds migration `002_turn_host_pending.sql`.
+- A refused session start is only a skipped Turn when the host refused the agent itself (not invokable, paused, over budget, gone, company not active, skipped by its wake policy). Any other error fails the Turn with the real error text (F2).
 - The page polls (5 s during a Round, 30 s otherwise, not while hidden) when the host's live stream is off, and the notice no longer tells the person to reload (F5).
 - Markdown lists keep their bullets and numbers (F8).
 - README: retries, known limits and access notes corrected after the manual check (F3, F4, F7).

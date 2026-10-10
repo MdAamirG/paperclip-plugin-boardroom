@@ -105,7 +105,8 @@ describe("polling when the live stream is off", () => {
     const notice = await screen.findByTestId("live-updates-notice");
     expect(notice).toHaveTextContent("Live updates are off");
     expect(notice).toHaveTextContent("Plugin stream bridge is not enabled");
-    expect(notice).toHaveTextContent("refreshes itself and checks for changes every 5 seconds");
+    // The notice first shows the idle interval until the running Round loads, then the active one.
+    await waitFor(() => expect(notice).toHaveTextContent("refreshes itself and checks for changes every 5 seconds"));
     expect(notice).not.toHaveTextContent(/reload the page/i);
     expect(COMPANY_ID).toBeDefined();
   });

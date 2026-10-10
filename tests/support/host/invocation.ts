@@ -33,6 +33,13 @@ export class InvocationGate {
   /** Every company counts as having a configuration row (for tests that are not about this rule). */
   everyCompanyConfigured = false;
 
+  /**
+   * Whether some other invocation is active when an out-of-invocation call arrives. The host then
+   * says "missing, expired, or unknown invocation scope"; with none active (the usual case: a quiet
+   * session callback, the sweep) it says "company context is required".
+   */
+  otherInvocationActive = false;
+
   constructor(private readonly manifest: PaperclipPluginManifestV1) {}
 
   private check(method: string, companyId: string | null | undefined): void {
@@ -40,9 +47,15 @@ export class InvocationGate {
     const scope = storage.getStore();
     if (scope?.companyId === companyId) return;
     if (!scope && (this.everyCompanyConfigured || this.configured.has(companyId))) return;
-    throw new Error(
-      `Plugin ${this.manifest.id} is not allowed to perform "${method}": the worker referenced a missing, expired, or unknown invocation scope`,
-    );
+    const reason = scope?.companyId
+      ? `requested company "${companyId}" but the current invocation is scoped to company "${scope.companyId}"`
+      : this.otherInvocationActive
+        ? "the worker referenced a missing, expired, or unknown invocation scope"
+        : "company context is required";
+    // The worker sees a JsonRpcCallError carrying the host's INVOCATION_SCOPE_DENIED code.
+    throw Object.assign(new Error(`Plugin "${this.manifest.id}" is not allowed to perform "${method}": ${reason}`), {
+      code: -32005,
+    });
   }
 
   /** Wrap the company-scoped calls the plugin uses. Call after every other fake is installed. */

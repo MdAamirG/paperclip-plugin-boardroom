@@ -119,6 +119,12 @@ export interface BoardroomHarness {
    * admits that company's calls made outside an invocation. Boardroom must not depend on it.
    */
   saveCompanyConfig(companyId: string): void;
+  /**
+   * Whether the host has another invocation active when an out-of-invocation call arrives. Only
+   * changes the refusal's wording ("missing, expired, or unknown invocation scope" instead of
+   * "company context is required").
+   */
+  setOtherInvocationActive(active: boolean): void;
   /** Simulate a worker restart on the same database. */
   restart(): Promise<void>;
   close(): Promise<void>;
@@ -210,6 +216,9 @@ export async function createBoardroomHarness(options: CreateHarnessOptions = {})
       dispatchApiRequest({ manifest, plugin, records }, method, requestPath, requestOptions),
     saveCompanyConfig: (companyId) => {
       gate.configured.add(companyId);
+    },
+    setOtherInvocationActive: (active) => {
+      gate.otherInvocationActive = active;
     },
     simulateSessionEvent: (sessionId, event) => sessions.simulateEvent(sessionId, event),
     failNextSend: (error = new Error("Session send failed")) => sessions.failNext(error),

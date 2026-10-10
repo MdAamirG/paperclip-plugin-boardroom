@@ -47,22 +47,33 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The host's JSON-RPC code for a call outside the plugin's invocation scope (`PLUGIN_RPC_ERROR_CODES.INVOCATION_SCOPE_DENIED`). */
+const INVOCATION_SCOPE_DENIED = -32005;
+
 /**
  * True when the host refused a call because it was made outside a host invocation (a session event
  * callback, a job) for a company without a plugin configuration row. That is a plugin-side
- * problem, never a statement about the agent.
+ * problem, never a statement about the agent. The host refuses in three wordings: "company context
+ * is required" (no invocation active at all, the usual case), "missing, expired, or unknown
+ * invocation scope" (another invocation active) and "requested company ... scoped to company ...".
  */
 export function isScopeRefusal(error: unknown): boolean {
-  return /invocation scope/i.test(errorMessage(error));
+  if ((error as { code?: unknown } | null)?.code === INVOCATION_SCOPE_DENIED) return true;
+  return /is not allowed to perform "[^"]+": (company context is required|.*invocation scope|requested company|the current invocation is scoped)/i.test(
+    errorMessage(error),
+  );
 }
 
 /**
- * True when the host refused to run the agent itself: budget, paused, not invokable, gone, or
- * skipped by its wake policy. Only these make a Turn `skipped`; any other error is a failure.
+ * True when the host refused to run the agent itself: budget, paused, not invokable, gone (the host
+ * says "Agent not found" or "Agent no longer exists"), the company not active, or skipped by its
+ * wake policy. Only these make a Turn `skipped`; any other error is a failure.
  */
 export function isAgentRefusal(error: unknown): boolean {
   if (isScopeRefusal(error)) return false;
-  return /not invokable|no longer exists|paused|budget|wakeup was skipped|over (the )?limit|spending limit/i.test(errorMessage(error));
+  return /not invokable|agent not found|no longer exists|paused|budget|company is not active|wakeup was skipped|over (the )?limit|spending limit/i.test(
+    errorMessage(error),
+  );
 }
 
 /**

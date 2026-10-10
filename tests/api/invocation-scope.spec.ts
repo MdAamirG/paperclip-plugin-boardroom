@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { RoomDetail, RoundListResponse, SendMessageResponse } from "../../src/api/types.js";
 import { ROUND_SWEEP_JOB_KEY } from "../../src/constants.js";
 import { getRound, listTurns } from "../../src/db/index.js";
+import { table } from "../../src/db/sql.js";
 import { createBoardroomHarness, type BoardroomHarness } from "../support/harness.js";
 
 let harness: BoardroomHarness | undefined;
@@ -54,6 +55,8 @@ describe("the host's invocation-scope rule in the harness", () => {
   it("refuses a company-scoped call outside an invocation, admits it inside one and for a company with a config row", async () => {
     const s = await setup();
     const call = () => s.h.ctx.agents.list({ companyId: s.company.id, limit: 1 });
+    await expect(call()).rejects.toThrow(/company context is required/);
+    s.h.setOtherInvocationActive(true);
     await expect(call()).rejects.toThrow(/missing, expired, or unknown invocation scope/);
     s.h.saveCompanyConfig(s.company.id);
     await expect(call()).resolves.toBeDefined();
@@ -115,6 +118,38 @@ describe("a Round in a company without a plugin configuration row (F1)", () => {
     expect(activityMessages(s).filter((m) => m === "Turn posted")).toHaveLength(1);
   });
 
+  it("does not finish a posted Turn whose reply is not linked yet, and finishes it once it is", async () => {
+    const s = await setup();
+    const roundId = await askAll(s);
+    const [first] = await turnsOf(s, roundId);
+    live(s, first!, "One.");
+    await settled();
+    const messageId = (await turnsOf(s, roundId))[0]!.messageId!;
+    // The gap between settling the Turn and linking its Message, as a concurrent finisher sees it.
+    await s.h.ctx.db.execute(`UPDATE ${table(s.h.ctx.db, "turns")} SET message_id = NULL WHERE company_id = $1 AND id = $2`, [s.company.id, first!.id]);
+    await runFinished(s, first!.runId!, first!.agentId);
+    expect((await turnsOf(s, roundId)).map((t) => t.status)).toEqual(["finished", "queued"]);
+    expect(activityMessages(s)).not.toContain("Turn posted");
+
+    await s.h.ctx.db.execute(`UPDATE ${table(s.h.ctx.db, "turns")} SET message_id = $3 WHERE company_id = $1 AND id = $2`, [s.company.id, first!.id, messageId]);
+    await runFinished(s, first!.runId!, first!.agentId);
+    expect((await turnsOf(s, roundId)).map((t) => t.status)).toEqual(["finished", "running"]);
+    expect(s.h.activity.find((entry) => entry.message === "Turn posted")?.metadata).toMatchObject({ messageId });
+  });
+
+  it("does not fail queued Turns from the sweep when the host says company context is required", async () => {
+    const s = await setup();
+    const roundId = await askAll(s);
+    const [first] = await turnsOf(s, roundId);
+    live(s, first!, "One.");
+    await settled();
+    await s.h.sdk.runJob(ROUND_SWEEP_JOB_KEY);
+    const turns = await turnsOf(s, roundId);
+    expect(turns.map((t) => t.status)).toEqual(["finished", "queued"]);
+    expect(turns[0]).toMatchObject({ hostPending: true });
+    expect(s.h.sessionSends).toHaveLength(1);
+  });
+
   it("continues on the page's own poll when no run event comes", async () => {
     const s = await setup();
     const roundId = await askAll(s);
@@ -160,11 +195,20 @@ describe("what a failed session start means (F2)", () => {
     return { s, roundId };
   }
 
-  it("records a scope error as a failed Turn with the real text, not as the agent being not invokable", async () => {
-    const message = 'Plugin x is not allowed to perform "agents.sessions.create": the worker referenced a missing, expired, or unknown invocation scope';
+  it.each([
+    "company context is required",
+    "the worker referenced a missing, expired, or unknown invocation scope",
+    'requested company "c-2" but the current invocation is scoped to company "c-1"',
+  ])("records a scope error as a failed Turn with the real text, not as the agent being not invokable: %s", async (reason) => {
+    const message = `Plugin "x" is not allowed to perform "agents.sessions.create": ${reason}`;
     const { s, roundId } = await failFirstWith(new Error(message));
     const turns = await turnsOf(s, roundId);
     expect(turns[0]).toMatchObject({ status: "finished", outcome: "failed", skipReason: null, hostMessage: message });
+  });
+
+  it("recognises a scope error by the host's error code alone", async () => {
+    const { s, roundId } = await failFirstWith(Object.assign(new Error("Agent is paused"), { code: -32005 }));
+    expect((await turnsOf(s, roundId))[0]).toMatchObject({ outcome: "failed", skipReason: null });
   });
 
   it("records an unknown error as failed with its text", async () => {
@@ -172,7 +216,17 @@ describe("what a failed session start means (F2)", () => {
     expect((await turnsOf(s, roundId))[0]).toMatchObject({ outcome: "failed", skipReason: null, hostMessage: "socket hang up" });
   });
 
-  it.each(["Agent is not invokable in its current state", "Agent is paused", "Agent is over budget (limit $5.00)", "Agent no longer exists"])(
+  // The host's own wordings (agent-invokability.ts, budgets.ts, plugin-host-services.ts, heartbeat.ts).
+  it.each([
+    "Agent is not invokable in its current state",
+    "Agent is not invokable because its reporting chain is invalid",
+    "Agent no longer exists",
+    "Agent not found",
+    "Agent is paused because its budget hard-stop was reached.",
+    "Company is paused and cannot start new work.",
+    "Company is not active",
+    "Agent wakeup was skipped by heartbeat policy",
+  ])(
     "still skips a genuine refusal of the agent: %s",
     async (message) => {
       const { s, roundId } = await failFirstWith(new Error(message));

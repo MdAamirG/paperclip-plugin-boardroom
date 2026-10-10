@@ -261,23 +261,28 @@ export function getRunningTurn(db: Db, companyId: string, roundId: string): Prom
 
 /**
  * Claim the host part of settling a finished Turn. True for exactly one caller, which then writes
- * the activity entry, closes the session and advances the Round.
+ * the activity entry, closes the session and advances the Round. A `posted` Turn whose Message is
+ * not linked yet is not claimable: its settlement is still saving the reply (or died doing so and
+ * the sweep repairs it), and finalizing early would log no Message and start the next Turn
+ * without the reply in its prompt.
  */
 export async function claimTurnFinalization(db: Db, companyId: string, turnId: string): Promise<boolean> {
   const { rowCount } = await db.execute(
     `UPDATE ${table(db, "turns")} SET host_pending = false
-      WHERE company_id = $1 AND id = $2 AND status = 'finished' AND host_pending`,
+      WHERE company_id = $1 AND id = $2 AND status = 'finished' AND host_pending
+        AND NOT (outcome = 'posted' AND message_id IS NULL)`,
     [companyId, turnId],
   );
   return rowCount > 0;
 }
 
-/** Finished Turns whose host part is still to do, oldest first. */
+/** Finished Turns whose host part is ready to do, oldest first (see `claimTurnFinalization`). */
 export function listUnfinalizedTurns(db: Db, companyId: string): Promise<Turn[]> {
   return selectMany(
     db,
     `SELECT * FROM ${table(db, "turns")}
       WHERE company_id = $1 AND status = 'finished' AND host_pending
+        AND NOT (outcome = 'posted' AND message_id IS NULL)
       ORDER BY finished_at, id LIMIT 100`,
     [companyId],
     mapTurn,

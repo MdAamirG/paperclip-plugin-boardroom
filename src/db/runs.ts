@@ -49,7 +49,11 @@ export function listRunningTurns(db: Db, companyId: string): Promise<Turn[]> {
   );
 }
 
-/** `running` Rounds with no `running` Turn: nothing in flight, so the sweep advances them. */
+/**
+ * `running` Rounds with nothing in flight, so the sweep advances them: no `running` Turn and no
+ * finished Turn whose host part is still to do (finishing that Turn advances the Round itself, and
+ * advancing earlier would start the next Turn before the previous reply is saved).
+ */
 export function listIdleRunningRounds(db: Db, companyId: string): Promise<Round[]> {
   return selectMany(
     db,
@@ -57,7 +61,8 @@ export function listIdleRunningRounds(db: Db, companyId: string): Promise<Round[
             array_to_json(addressed_agent_ids) AS addressed_agent_ids, status, created_at, updated_at, ended_at
        FROM ${table(db, "rounds")} r
       WHERE r.company_id = $1 AND r.status = 'running'
-        AND NOT EXISTS (SELECT 1 FROM ${table(db, "turns")} t WHERE t.company_id = $1 AND t.round_id = r.id AND t.status = 'running')
+        AND NOT EXISTS (SELECT 1 FROM ${table(db, "turns")} t
+                         WHERE t.company_id = $1 AND t.round_id = r.id AND (t.status = 'running' OR t.host_pending))
       ORDER BY r.created_at, r.id`,
     [companyId],
     mapRound,
