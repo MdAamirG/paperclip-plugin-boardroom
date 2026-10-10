@@ -218,6 +218,29 @@ describe("Round controls: Stop while the run is still starting (no host cancel)"
     expect(posts(api)).toEqual([`${BASE}/stop`]);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("warns when the run ended before the page could cancel it, so its reply was kept", async () => {
+    const rounds = { current: starting() };
+    const api = stopApi(rounds);
+    const { roomChanged } = renderStarting(api);
+    await pressStop();
+    rounds.current = starting({ runId: "run-1", status: "finished", outcome: "posted", messageId: "m2" });
+    roomChanged(1);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The Round is stopped, but its run was not cancelled");
+    expect(posts(api)).toEqual([`${BASE}/stop`]);
+  });
+
+  it("does not warn when the run ended as failed (it was cancelled)", async () => {
+    const rounds = { current: starting() };
+    const api = stopApi(rounds);
+    const { roomChanged } = renderStarting(api);
+    await pressStop();
+    rounds.current = starting({ runId: "run-1", status: "finished", outcome: "failed" });
+    roomChanged(1);
+    await waitFor(() => expect(screen.queryByText(/cancelled from this page as soon as it starts/)).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });
 
 describe("Round progress: stopped state", () => {

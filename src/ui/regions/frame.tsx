@@ -9,6 +9,8 @@ export interface RegionProps {
   refreshKey: number;
   /** Fetch the Room detail again now, for example after a mutation. */
   reloadRoom: () => void;
+  /** Round progress says whether it is waiting to cancel a run Stop could not cancel yet (the page then keeps refreshing at the active rate). */
+  onWaitingForRun?: (waiting: boolean) => void;
 }
 
 /** The labelled box around one region. `data-region` is the stable hook for tests and later tickets. */

@@ -21,9 +21,11 @@ export function RoomDetailPage({ companyId, roomId }: { companyId: string; roomI
   const client = useBoardroomClient(companyId);
   const navigation = useHostNavigation();
   const live = useRoomChanged(companyId, roomId);
-  // The host's stream bridge may be off (501): then poll, faster while a Round is active.
+  // The host's stream bridge may be off (501): then poll, faster while a Round is active or a
+  // stopped Round's run is still to be cancelled from this page.
   const [roundActive, setRoundActive] = useState(false);
-  const poll = useStreamFallbackPoll(live.streamError !== null, roundActive);
+  const [waitingForRun, setWaitingForRun] = useState(false);
+  const poll = useStreamFallbackPoll(live.streamError !== null, roundActive || waitingForRun);
   const refreshKey = live.tick + poll.tick;
   const room = useAsyncResource(() => client.getRoom(roomId), [client, roomId], refreshKey);
   const hasActiveRound = room.data?.activeRound != null;
@@ -56,7 +58,7 @@ export function RoomDetailPage({ companyId, roomId }: { companyId: string; roomI
     );
   }
 
-  const regionProps: RegionProps = { companyId, detail: room.data, refreshKey, reloadRoom: room.reload };
+  const regionProps: RegionProps = { companyId, detail: room.data, refreshKey, reloadRoom: room.reload, onWaitingForRun: setWaitingForRun };
   return (
     <div className="br-stack">
       {back}

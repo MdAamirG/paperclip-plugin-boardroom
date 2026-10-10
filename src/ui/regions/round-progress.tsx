@@ -16,6 +16,7 @@ interface AwaitedRun {
 }
 
 const RUN_MAY_BE_RUNNING = "The Round is stopped, but its run may still be running";
+const RUN_NOT_CANCELLED = "The Round is stopped, but its run was not cancelled";
 
 /**
  * The active Round's Turns in order, each with its status, and Pause, Resume and Stop for a user
@@ -24,9 +25,10 @@ const RUN_MAY_BE_RUNNING = "The Round is stopped, but its run may still be runni
  *
  * Stop on a host without a session cancel answers `fallback`, and the page cancels the run through
  * the board route. When the Turn's run was still starting there is no run id yet: the page then
- * re-reads the Round on every Room change and cancels the run as soon as the Turn has its id.
+ * re-reads the Round on every Room change and cancels the run as soon as the Turn has its id
+ * (and says so when the run ended first and its reply was kept).
  */
-export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom }: RegionProps) {
+export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom, onWaitingForRun }: RegionProps) {
   const round = detail.activeRound;
   const api = useBoardroomApi();
   const client = useBoardroomClient(companyId);
@@ -91,8 +93,16 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom 
         if (turn?.status === "running" && !turn.runId) return; // Still being sent.
         if (!turn) throw new Error("The stopped Turn could not be found");
         setAwaitedRun(null);
-        // A Turn that finished meanwhile has nothing left to cancel (it was skipped, or its run ended).
-        if (turn.status === "running" && turn.runId) await cancelRun(turn.runId);
+        if (turn.status === "running" && turn.runId) {
+          await cancelRun(turn.runId);
+        } else if (turn.outcome === "posted" || turn.outcome === "silent") {
+          // The run ended before this page saw its id: it was not cancelled and its reply was kept.
+          setError({
+            title: RUN_NOT_CANCELLED,
+            error: new Error("The agent's run finished before this page could cancel it, and its reply (if any) was kept."),
+          });
+        }
+        // Skipped (no run started) or failed (cancelled, or the run failed): nothing more to do.
       } catch (failure) {
         if (!current) return;
         setAwaitedRun(null);
@@ -107,6 +117,8 @@ export function RoundProgressRegion({ companyId, detail, refreshKey, reloadRoom 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `cancelRun` only closes over `api`.
   }, [awaitedRun, refreshKey, client, api, detail.room.id]);
+
+  useEffect(() => onWaitingForRun?.(awaitedRun !== null), [awaitedRun, onWaitingForRun]);
 
   return (
     <RegionFrame region="round-progress" title="Round progress">

@@ -7,7 +7,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BoardroomPage } from "../../src/ui/index.js";
 import { POLL_ACTIVE_MS, POLL_IDLE_MS } from "../../src/ui/hooks.js";
-import { COMPANY_ID, detailFixture, roundFixture } from "../support/ui-fixtures.js";
+import { COMPANY_ID, detailFixture, roundFixture, turnFixture } from "../support/ui-fixtures.js";
 import { createMockApi, renderWithBoardroom, sdkUi, type MockBoardroomApi } from "../support/ui.js";
 
 const ROOM_PATH = "/rooms/room-1";
@@ -96,6 +96,39 @@ describe("polling when the live stream is off", () => {
     setVisibility("visible");
     await advance(10);
     expect(calls(api, ROOM_PATH)).toBeGreaterThan(hidden);
+  });
+
+  it("keeps polling every 5 seconds after Stop while the page waits to cancel a run that was still starting", async () => {
+    sdkUi.setStreamError("boardroom", OFF);
+    const starting = (turn: Parameters<typeof turnFixture>[0] = {}) =>
+      roundFixture({ id: "r1", turns: [turnFixture({ id: "t1", status: "running", runId: null, ...turn })] });
+    let detail = detailFixture({ activeRound: starting() });
+    let rounds = [roundFixture({ ...starting(), status: "stopped" })];
+    const api = createMockApi()
+      .on("GET", ROOM_PATH, () => detail)
+      .on("POST", "/rooms/room-1/rounds/r1/stop", () => {
+        detail = detailFixture({ activeRound: null });
+        return { round: rounds[0], cancel: "fallback" };
+      })
+      .on("POST", "host:/heartbeat-runs/run-1/cancel", {});
+    renderRoom(api);
+    api.on("GET", "/rooms/room-1/rounds", () => ({ rounds }));
+    const notice = await screen.findByTestId("live-updates-notice");
+    await waitFor(() => expect(notice).toHaveTextContent("every 5 seconds"));
+
+    act(() => screen.getByRole("button", { name: "Stop" }).click());
+    act(() => screen.getByRole("button", { name: "Stop Round" }).click());
+    await screen.findByText(/cancelled from this page as soon as it starts/);
+    // The Room reloaded: no Round is active any more, but the page still waits for the run id.
+    await screen.findByText("Round 1 was stopped.");
+    await advance(10);
+    expect(notice).toHaveTextContent("every 5 seconds");
+
+    rounds = [roundFixture({ ...starting({ runId: "run-1" }), status: "stopped" })];
+    await advance(POLL_ACTIVE_MS + 100);
+    await waitFor(() => expect(api.calls.some((c) => c.method === "POST" && c.path === "host:/heartbeat-runs/run-1/cancel")).toBe(true));
+    // Nothing left to wait for: back to the idle rate.
+    await waitFor(() => expect(notice).toHaveTextContent("every 30 seconds"));
   });
 
   it("shows a small honest notice that says the page refreshes itself, with no instruction to reload", async () => {
