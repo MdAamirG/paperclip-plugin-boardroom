@@ -310,6 +310,7 @@ This part is carried over from the closed decision "Round engine and turn dispat
   1. Mark the Round `stopped`, and mark queued Turns `skipped` with reason `stopped`.
   2. Try the host cancel for the running Turn's session.
   3. If the host does not support it, the route returns the run id and the plugin page calls the existing board route that cancels a run, as the logged-in user.
+  4. If the running Turn has no run id yet (its send is still in flight), there is nothing to hand over. The route answers `fallback` without a run id on a host without the cancel, or `none` when the host has it (a host refusal then is not a failure). When the send returns into the stopped Round, the plugin tries the host cancel again and announces the Room. The page, which saw a running Turn with no run id, re-reads the Round on each Room change (or poll, kept at the active-Round rate) and cancels the run through the board route once the Turn has its id. It warns when it cannot cancel the run, or when the run ended first. A run nobody cancels settles normally and its reply is kept, as when the page's cancel fails for a known run id. (Amended 2026-10-10.)
 
   A cancelled run makes the Turn `failed`. A stopped Round never dispatches another Turn, even when the cancel fails. The Room stays open.
 
