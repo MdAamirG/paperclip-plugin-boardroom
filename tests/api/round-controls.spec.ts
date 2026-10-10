@@ -354,7 +354,9 @@ describe("Stop", () => {
     const runId = s.h.sessionSends[0]!.runId;
     expect((await turnsOf(s, roundId))[0]).toMatchObject({ status: "running", runId });
     expect(s.h.streamEvents.some((e) => (e.event as { roomId?: string }).roomId === s.room.id)).toBe(true);
-    expect(s.h.logs.some((l) => /could not cancel a run that started after its Round was stopped/.test(l.message))).toBe(true);
+    // The expected fallback is not a warning.
+    expect(s.h.logs.find((l) => /left a run that started after its Round was stopped to the page/.test(l.message))?.level).toBe("info");
+    expect(s.h.logs.some((l) => /could not cancel a run that started/.test(l.message))).toBe(false);
 
     // Not cancelled (no page, or its cancel failed): the run's reply is kept, as for a known run id.
     await reply(s, roundId, 0, "Late view");

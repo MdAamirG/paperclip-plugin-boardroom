@@ -213,7 +213,10 @@ async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promi
     // `fallback` with no run id and the page cancels the run by its id: announce the Room so the
     // page re-reads and finds it. A run nobody cancels settles like one whose cancel failed.
     if (await roundIsStopped(ctx, companyId, round.id)) {
-      if ((await cancelSessionRun(ctx, session.sessionId, companyId, STOP_CANCEL_REASON)) !== "host") {
+      const cancel = await cancelSessionRun(ctx, session.sessionId, companyId, STOP_CANCEL_REASON);
+      if (cancel === "fallback") {
+        ctx.logger.info("Boardroom left a run that started after its Round was stopped to the page to cancel", { turnId: turn.id, runId });
+      } else if (cancel === "failed") {
         ctx.logger.warn("Boardroom could not cancel a run that started after its Round was stopped", { turnId: turn.id, runId });
       }
       announceRoomChanged(ctx, companyId, round.roomId);
