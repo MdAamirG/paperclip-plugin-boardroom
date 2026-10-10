@@ -176,8 +176,10 @@ export async function advanceRound(ctx: PluginContext, companyId: string, roundI
 
 /**
  * Run one Turn: a new session, one prompt, the run id kept on the Turn. Returns true while the
- * Turn is waiting for the agent, false when it could not start and was settled as failed (the
- * caller then continues with the next Turn). A Turn is never retried.
+ * Turn is waiting for the agent, false when no run started and the Turn is already settled:
+ * skipped as stopped (the Round was stopped while it was starting), skipped because the host
+ * refused the agent, or failed (the caller then continues with the next Turn, which on a stopped
+ * Round starts nothing). A Turn is never retried.
  */
 async function dispatchTurn(ctx: PluginContext, round: Round, turn: Turn): Promise<boolean> {
   const companyId = round.companyId;
