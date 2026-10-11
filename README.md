@@ -26,18 +26,24 @@ Rooms are not issues: they do not appear in the issue list. Follow-up work does.
 
 Enabling the plugin is the on/off switch. There is no experimental flag and no plugin setting. While the plugin is not installed or is disabled, the sidebar entry is absent and the plugin's routes answer 404 or 503 (this is the host's behaviour and is part of the manual check).
 
-From a local path:
+Boardroom is published on npm as [`paperclip-plugin-boardroom`](https://www.npmjs.com/package/paperclip-plugin-boardroom). Plugins are installed once per Paperclip instance.
+
+From npm, with the Paperclip CLI:
+
+```bash
+paperclipai plugin install paperclip-plugin-boardroom
+# or pin a version
+paperclipai plugin install paperclip-plugin-boardroom --version 0.1.0
+```
+
+Or in the board UI: open the Plugin Manager (instance settings, Plugins), choose **Install Plugin** and enter `paperclip-plugin-boardroom` as the npm package name.
+
+From a local path (for development):
 
 ```bash
 pnpm install
 pnpm build
 paperclipai plugin install /absolute/path/to/paperclip-plugin-boardroom
-```
-
-From npm (once published; it has not been published yet):
-
-```bash
-paperclipai plugin install paperclip-plugin-boardroom
 ```
 
 ## Capabilities

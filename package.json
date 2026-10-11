@@ -5,6 +5,14 @@
   "description": "Boardroom: human-led multi-agent discussion Rooms for Paperclip",
   "license": "MIT",
   "author": "MdAamirG",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MdAamirG/paperclip-plugin-boardroom.git"
+  },
+  "homepage": "https://github.com/MdAamirG/paperclip-plugin-boardroom#readme",
+  "bugs": {
+    "url": "https://github.com/MdAamirG/paperclip-plugin-boardroom/issues"
+  },
   "keywords": [
     "paperclip",
     "plugin",
