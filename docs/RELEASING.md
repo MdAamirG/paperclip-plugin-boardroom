@@ -17,10 +17,10 @@ This is a checklist. The "Before publishing" items were checked on 2026-10-11 fr
 
 ## Publish
 
-- [ ] `npm publish` from the clean tree, under your npm account (add `--access public` if you use a scope).
-- [ ] Tag the released commit: `git tag v0.1.0` and push the tag.
+- [x] `npm publish` from the clean tree, under your npm account (add `--access public` if you use a scope).
+- [x] Tag the released commit: `git tag v0.1.0` and push the tag.
 
 ## After publishing
 
-- [ ] Install from npm into a scratch Paperclip instance and confirm the Boardroom entry appears.
+- [x] Install from npm into a scratch Paperclip instance and confirm the Boardroom entry appears.
 - [ ] Post the repository link on Paperclip issue #14143.

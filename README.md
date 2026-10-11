@@ -36,7 +36,13 @@ paperclipai plugin install paperclip-plugin-boardroom
 paperclipai plugin install paperclip-plugin-boardroom --version 0.1.0
 ```
 
+The CLI talks to `http://localhost:3100` by default. For another instance, add `--api-base <url>` or set `PAPERCLIP_API_URL`.
+
 Or in the board UI: open the Plugin Manager (instance settings, Plugins), choose **Install Plugin** and enter `paperclip-plugin-boardroom` as the npm package name.
+
+The host puts npm-installed plugins in `~/.paperclip/plugins/`. Every Paperclip instance on the machine shares that folder, even when `PAPERCLIP_HOME` points elsewhere.
+
+A new Room needs at least one agent, so add an agent to the company before you choose **New Room**.
 
 From a local path (for development):
 
