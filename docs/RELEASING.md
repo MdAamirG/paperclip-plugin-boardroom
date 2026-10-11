@@ -23,4 +23,4 @@ This is a checklist. The "Before publishing" items were checked on 2026-10-11 fr
 ## After publishing
 
 - [x] Install from npm into a scratch Paperclip instance and confirm the Boardroom entry appears.
-- [ ] Post the repository link on Paperclip issue #14143.
+- [x] Post the repository link on Paperclip issue #14143 (https://github.com/paperclipai/paperclip/issues/14143#issuecomment-6106767274).
